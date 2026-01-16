@@ -1062,6 +1062,127 @@ assert queue.size() == 1     # Only one task in queue
 
 SHA256 collisions are extremely rare (practically impossible). The system includes collision detection that compares task details if the same signature maps to different tasks.
 
+### Task Cancellation
+
+The system supports cancelling pending or running tasks with graceful shutdown and force kill options:
+
+```python
+from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
+from jobqueue.core.task import Task
+
+# Cancel pending task (removes from queue)
+task = Task(name="my_task", args=[1], status=TaskStatus.PENDING)
+task_cancellation.cancel_pending_task(task, reason=CancellationReason.USER_REQUESTED)
+
+# Cancel running task (requests cancellation)
+task = Task(name="my_task", args=[1], status=TaskStatus.RUNNING)
+task_cancellation.cancel_running_task(task, force=False)  # Graceful
+```
+
+**Cancellation Reasons:**
+
+- `USER_REQUESTED`: User requested cancellation
+- `TIMEOUT`: Task exceeded timeout
+- `DEPENDENCY_FAILED`: Dependency task failed
+- `WORKER_SHUTDOWN`: Worker shutting down
+- `SYSTEM_ERROR`: System error occurred
+- `RATE_LIMIT_EXCEEDED`: Rate limit exceeded
+- `OTHER`: Other reasons
+
+**How It Works:**
+
+1. **Pending Tasks**: Removed from queue immediately
+2. **Running Tasks**: Cancellation requested, worker checks `should_cancel()` periodically
+3. **Graceful Shutdown**: Worker stops execution cleanly
+4. **Force Kill**: Worker forcefully terminates task (if supported)
+
+**Cancellation API:**
+
+```python
+# Request cancellation
+task_cancellation.request_cancellation(
+    task_id,
+    reason=CancellationReason.USER_REQUESTED,
+    force=False  # True for force kill
+)
+
+# Check if task should be cancelled
+should_cancel, force, reason = task_cancellation.should_cancel(task_id)
+
+# Cancel task (handles pending/running automatically)
+task_cancellation.cancel_task(task, reason=CancellationReason.USER_REQUESTED)
+
+# Get cancellation information
+info = task_cancellation.get_cancellation_info(task_id)
+```
+
+**Worker Cancellation Check:**
+
+Workers check for cancellation:
+- Before starting task execution
+- After task execution completes
+- Periodically during long-running tasks (if task supports it)
+
+```python
+# In worker code
+should_cancel, force, reason = task_cancellation.should_cancel(task.id)
+if should_cancel:
+    task.mark_cancelled(reason)
+    return  # Stop execution
+```
+
+**REST API Endpoint:**
+
+```bash
+# Cancel task
+POST /tasks/{task_id}/cancel?reason=user_requested&force=false
+
+# Response
+{
+  "message": "Task cancelled",
+  "task_id": "task-123",
+  "status": "cancelled",
+  "reason": "user_requested",
+  "force": false
+}
+```
+
+**Test Case: Cancel Pending and Running Tasks**
+
+```python
+# 1. Cancel pending task
+task1 = Task(name="task", args=[1], status=TaskStatus.PENDING)
+queue.enqueue(task1)
+task_cancellation.cancel_pending_task(task1)
+assert task1.status == TaskStatus.CANCELLED
+assert queue.size() == 0  # Removed from queue
+
+# 2. Cancel running task
+task2 = Task(name="task", args=[1], status=TaskStatus.RUNNING)
+task_cancellation.cancel_running_task(task2)
+should_cancel, _, _ = task_cancellation.should_cancel(task2.id)
+assert should_cancel is True  # Worker will check and stop
+```
+
+**Cancellation Features:**
+
+- **Pending Task Removal**: Tasks removed from queue immediately
+- **Running Task Cancellation**: Workers check `should_cancel()` and stop gracefully
+- **Cancellation Reasons**: Track why task was cancelled
+- **Graceful vs Force**: Support both graceful shutdown and force kill
+- **Status Tracking**: Tasks marked as CANCELLED with reason
+- **Redis Storage**: Cancellation flags stored in `cancel:{task_id}`
+- **Worker Integration**: Automatic cancellation checks in workers
+
+**Deep End: Long-Running Tasks**
+
+For tasks that don't check `should_cancel()` (e.g., long-running loops), consider:
+- Breaking loops into smaller chunks
+- Adding periodic cancellation checks in task code
+- Using timeouts as fallback
+- Implementing cleanup handlers for partially completed work
+
+## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
 
