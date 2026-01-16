@@ -11,6 +11,8 @@ from jobqueue.core.queue import JobQueue
 from jobqueue.core.task import Task, TaskPriority, TaskStatus
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.backend.postgres_backend import postgres_backend
+from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
+from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfig
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -45,6 +47,28 @@ class HealthResponse(BaseModel):
     status: str
     redis_connected: bool
     postgres_connected: bool
+
+
+class RateLimitConfigRequest(BaseModel):
+    """Request model for rate limit configuration."""
+    max_tasks_per_minute: int
+    burst_allowance: int = 0
+    enabled: bool = True
+
+
+class RateLimitStatsResponse(BaseModel):
+    """Response model for rate limit stats."""
+    queue: str
+    window_size_seconds: int
+    rate_limit_enabled: bool
+    max_tasks_per_minute: int
+    burst_allowance: int
+    current_count: int
+    burst_used: int
+    remaining_capacity: int
+    burst_remaining: int
+    wait_time_seconds: float
+    is_unlimited: bool
 
 
 # Initialize FastAPI app
@@ -277,6 +301,116 @@ async def list_queues():
         return {"queues": queues}
     except Exception as e:
         log.error(f"Error listing queues: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/queues/{queue_name}/rate-limit", response_model=RateLimitStatsResponse, tags=["Rate Limiting"])
+async def get_rate_limit_stats(queue_name: str):
+    """
+    Get rate limiting statistics for a queue.
+    
+    Args:
+        queue_name: Queue name
+        
+    Returns:
+        Rate limiting statistics
+    """
+    try:
+        stats = distributed_rate_limiter.get_stats(queue_name)
+        return RateLimitStatsResponse(**stats)
+    except Exception as e:
+        log.error(f"Error getting rate limit stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.put("/queues/{queue_name}/rate-limit", tags=["Rate Limiting"])
+async def set_rate_limit(queue_name: str, config: RateLimitConfigRequest):
+    """
+    Set rate limit configuration for a queue.
+    
+    Args:
+        queue_name: Queue name
+        config: Rate limit configuration
+        
+    Returns:
+        Updated configuration
+    """
+    try:
+        queue_config_manager.set_rate_limit(
+            queue_name=queue_name,
+            max_tasks_per_minute=config.max_tasks_per_minute,
+            burst_allowance=config.burst_allowance,
+            enabled=config.enabled
+        )
+        
+        log.info(
+            f"Updated rate limit for queue {queue_name}",
+            extra={
+                "queue": queue_name,
+                "limit": config.max_tasks_per_minute,
+                "burst": config.burst_allowance,
+                "enabled": config.enabled
+            }
+        )
+        
+        return {
+            "message": f"Rate limit updated for queue {queue_name}",
+            "queue": queue_name,
+            "config": config.dict()
+        }
+    except Exception as e:
+        log.error(f"Error setting rate limit: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/queues/{queue_name}/rate-limit", status_code=status.HTTP_204_NO_CONTENT, tags=["Rate Limiting"])
+async def reset_rate_limit(queue_name: str):
+    """
+    Reset rate limit counters for a queue.
+    
+    Args:
+        queue_name: Queue name
+    """
+    try:
+        distributed_rate_limiter.reset(queue_name)
+        
+        log.info(f"Reset rate limit counters for queue {queue_name}")
+    except Exception as e:
+        log.error(f"Error resetting rate limit: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/rate-limits", tags=["Rate Limiting"])
+async def list_all_rate_limits():
+    """
+    List rate limit stats for all configured queues.
+    
+    Returns:
+        List of rate limit stats for all queues
+    """
+    try:
+        all_queues = queue_config_manager.list_queues()
+        
+        rate_limits = []
+        for queue_name in all_queues:
+            stats = distributed_rate_limiter.get_stats(queue_name)
+            rate_limits.append(stats)
+        
+        return {"rate_limits": rate_limits}
+    except Exception as e:
+        log.error(f"Error listing rate limits: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
