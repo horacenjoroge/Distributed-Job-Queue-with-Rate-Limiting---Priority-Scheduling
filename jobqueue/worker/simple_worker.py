@@ -221,6 +221,9 @@ class SimpleWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
+        # Store task as running for this worker (for recovery)
+        self._store_running_task(task)
+        
         # Update worker status to ACTIVE
         self.set_status(WorkerStatus.ACTIVE)
         
@@ -398,6 +401,9 @@ class SimpleWorker(Worker):
             # Stop timeout manager
             if timeout_manager:
                 timeout_manager.stop()
+            
+            # Remove task from running tasks
+            self._remove_running_task(task)
             
             # Update worker status back to IDLE
             self.set_status(WorkerStatus.IDLE)
@@ -635,6 +641,33 @@ class SimpleWorker(Worker):
                 )
         except Exception as e:
             log.error(f"Error cancelling dependent tasks: {e}")
+    
+    def _store_running_task(self, task: Task) -> None:
+        """
+        Store task as running for this worker (for recovery).
+        
+        Args:
+            task: Running task
+        """
+        try:
+            key = f"task:running:{self.worker_id}:{task.id}"
+            task_json = task.to_json()
+            redis_broker.client.setex(key, 3600, task_json)  # 1 hour TTL
+        except Exception as e:
+            log.error(f"Failed to store running task: {e}")
+    
+    def _remove_running_task(self, task: Task) -> None:
+        """
+        Remove task from running tasks.
+        
+        Args:
+            task: Completed task
+        """
+        try:
+            key = f"task:running:{self.worker_id}:{task.id}"
+            redis_broker.client.delete(key)
+        except Exception as e:
+            log.error(f"Failed to remove running task: {e}")
     
     def get_stats(self) -> dict:
         """
