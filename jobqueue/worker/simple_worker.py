@@ -11,6 +11,7 @@ from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.core.task_registry import task_registry
 from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.utils.logger import log
+from config import settings
 
 
 class SimpleWorker(Worker):
@@ -149,6 +150,9 @@ class SimpleWorker(Worker):
             # Task succeeded
             task.mark_success(result)
             
+            # Store result in Redis with TTL
+            self._store_result(task)
+            
             log.info(
                 f"Task {task.id} completed successfully",
                 extra={
@@ -171,6 +175,59 @@ class SimpleWorker(Worker):
                     "error": error_msg
                 }
             )
+    
+    def _store_result(self, task: Task):
+        """
+        Store task result in Redis with TTL.
+        
+        Args:
+            task: Completed task with result
+        """
+        try:
+            result_key = task.get_result_key()
+            task_json = task.to_json()
+            
+            # Store with configured TTL
+            redis_broker.set_with_ttl(
+                result_key,
+                task_json,
+                settings.result_ttl
+            )
+            
+            log.debug(
+                f"Stored result for task {task.id}",
+                extra={
+                    "task_id": task.id,
+                    "result_key": result_key,
+                    "ttl": settings.result_ttl
+                }
+            )
+            
+        except Exception as e:
+            log.error(f"Failed to store result for task {task.id}: {e}")
+    
+    def get_result(self, task_id: str) -> Optional[Task]:
+        """
+        Retrieve task result from Redis.
+        
+        Args:
+            task_id: Task ID
+            
+        Returns:
+            Task object with result, or None if not found
+        """
+        try:
+            result_key = f"result:{task_id}"
+            task_json = redis_broker.get(result_key)
+            
+            if task_json:
+                return Task.from_json(task_json)
+            
+            return None
+            
+        except Exception as e:
+            log.error(f"Failed to retrieve result for task {task_id}: {e}")
+            return None
     
     def get_stats(self) -> dict:
         """
