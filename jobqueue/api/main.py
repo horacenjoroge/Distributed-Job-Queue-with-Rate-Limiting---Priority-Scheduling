@@ -17,6 +17,7 @@ from jobqueue.core.dead_letter_queue import dead_letter_queue
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.core.worker_monitor import WorkerMonitor
 from jobqueue.core.task_deduplication import task_deduplication
+from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from config import settings
@@ -248,23 +249,57 @@ async def get_task(task_id: str):
         )
 
 
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"])
-async def cancel_task(task_id: str):
+@app.post("/tasks/{task_id}/cancel", tags=["Tasks"])
+async def cancel_task(
+    task_id: str,
+    reason: Optional[str] = None,
+    force: bool = False
+):
     """
-    Cancel a task.
+    Cancel a pending or running task.
     
     Args:
         task_id: Task ID to cancel
+        reason: Cancellation reason (user_requested, timeout, etc.)
+        force: If True, force kill running tasks
+        
+    Returns:
+        Cancellation result
     """
     try:
         queue = JobQueue()
-        success = queue.cancel_task(task_id)
+        task = queue.get_task(task_id)
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task {task_id} not found"
+            )
+        
+        # Parse reason
+        if reason:
+            try:
+                cancellation_reason = CancellationReason(reason)
+            except ValueError:
+                cancellation_reason = CancellationReason.USER_REQUESTED
+        else:
+            cancellation_reason = CancellationReason.USER_REQUESTED
+        
+        success = queue.cancel_task(task_id, reason=cancellation_reason, force=force)
         
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Could not cancel task {task_id}"
+                detail=f"Could not cancel task {task_id} (status: {task.status.value})"
             )
+        
+        return {
+            "message": f"Task {task_id} cancelled",
+            "task_id": task_id,
+            "status": task.status.value,
+            "reason": cancellation_reason.value,
+            "force": force
+        }
     except HTTPException:
         raise
     except Exception as e:

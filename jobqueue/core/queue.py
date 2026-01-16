@@ -192,12 +192,19 @@ class JobQueue:
         
         return total
     
-    def cancel_task(self, task_id: str) -> bool:
+    def cancel_task(
+        self,
+        task_id: str,
+        reason: CancellationReason = CancellationReason.USER_REQUESTED,
+        force: bool = False
+    ) -> bool:
         """
         Cancel a pending or running task.
         
         Args:
             task_id: Task ID to cancel
+            reason: Cancellation reason
+            force: If True, force kill running tasks
             
         Returns:
             True if successfully cancelled
@@ -209,14 +216,30 @@ class JobQueue:
             return False
         
         if task.status in [TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.CANCELLED]:
-            log.warning(f"Task {task_id} already completed with status {task.status}")
+            log.warning(
+                f"Task {task_id} already completed with status {task.status.value}",
+                extra={"task_id": task_id, "status": task.status.value}
+            )
             return False
         
-        task.mark_cancelled()
-        self.update_task(task)
+        # Use cancellation system
+        success = task_cancellation.cancel_task(task, reason=reason, force=force)
         
-        log.info(f"Task {task_id} cancelled")
-        return True
+        if success:
+            # Update task in database
+            self.update_task(task)
+            
+            log.info(
+                f"Task {task_id} cancelled",
+                extra={
+                    "task_id": task_id,
+                    "status": task.status.value,
+                    "reason": reason.value,
+                    "force": force
+                }
+            )
+        
+        return success
     
     def get_queue_stats(self) -> Dict[str, Any]:
         """
