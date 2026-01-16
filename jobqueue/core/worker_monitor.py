@@ -9,6 +9,7 @@ from typing import List, Dict
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.core.task import Task, TaskStatus
+from jobqueue.core.task_recovery import task_recovery
 from jobqueue.core.redis_queue import Queue
 from jobqueue.core.priority_queue import PriorityQueue
 from jobqueue.utils.logger import log
@@ -97,9 +98,14 @@ class WorkerMonitor:
                         extra={"dead_workers": stale_workers}
                     )
                     
-                    # Recover tasks from dead workers
+                    # Recover orphaned tasks using task recovery system
+                    recovered = task_recovery.recover_orphaned_tasks()
+                    self.tasks_recovered += recovered
+                    
+                    # Also use legacy recovery for compatibility
                     for worker_id in stale_workers:
-                        self._recover_worker_tasks(worker_id)
+                        legacy_recovered = self._recover_worker_tasks(worker_id)
+                        self.tasks_recovered += legacy_recovered
                     
                     self.dead_workers_detected += len(stale_workers)
                 
