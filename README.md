@@ -373,6 +373,95 @@ python -m jobqueue.core.scheduler
 - **Recurring Tasks**: Automatic rescheduling with cron patterns
 - **Task Management**: Cancel, pause, resume scheduled tasks
 
+### Task Dependencies & Chaining
+
+Create dependent task workflows where Task B runs only after Task A succeeds:
+
+```python
+from jobqueue.core.task import Task
+from jobqueue.core.task_dependencies import task_dependency_graph
+
+# Create parent task
+parent_task = Task(
+    name="fetch_data",
+    args=["database"]
+)
+
+# Create child task that depends on parent
+child_task = Task(
+    name="process_data",
+    args=[],
+    depends_on=[parent_task.id]  # Will wait for parent to complete
+)
+
+# Add dependencies to graph
+task_dependency_graph.add_dependencies(child_task)
+```
+
+#### Using chain() Helper
+
+Create sequential task chains easily:
+
+```python
+from jobqueue.core.task_chain import signature, chain
+
+# Create a chain of 3 tasks
+result = chain(
+    signature("fetch_data", args=["api"]),
+    signature("process_data", args=[]),
+    signature("save_results", args=[])
+).apply_async()
+
+# Or using | operator
+result = (
+    signature("fetch_data", args=["api"]) |
+    signature("process_data", args=[]) |
+    signature("save_results", args=[])
+).apply_async()
+```
+
+#### Parallel Execution with group()
+
+Execute multiple tasks in parallel:
+
+```python
+from jobqueue.core.task_chain import group
+
+# Execute 3 tasks simultaneously
+tasks = group(
+    signature("fetch_from_source1"),
+    signature("fetch_from_source2"),
+    signature("fetch_from_source3")
+).apply_async()
+```
+
+#### Chord Pattern (Parallel + Callback)
+
+Run tasks in parallel, then execute callback when all complete:
+
+```python
+from jobqueue.core.task_chain import chord
+
+# Parallel tasks + callback
+tasks = chord(
+    [
+        signature("process_chunk1"),
+        signature("process_chunk2"),
+        signature("process_chunk3")
+    ],
+    signature("aggregate_results")  # Runs after all chunks processed
+)
+```
+
+#### Dependency Features
+
+- **Circular Detection**: Automatically detects and prevents circular dependencies
+- **Failure Propagation**: Child tasks cancelled if parent fails
+- **DAG Support**: Complex directed acyclic graphs with multiple levels
+- **Execution Order**: Automatic topological sort for optimal execution
+- **Parallel Detection**: Identifies independent tasks that can run concurrently
+- **Re-queuing**: Tasks re-queued if dependencies not yet satisfied
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
