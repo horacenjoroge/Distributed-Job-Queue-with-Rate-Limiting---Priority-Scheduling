@@ -1,0 +1,164 @@
+version: '3.8'
+
+services:
+  # Redis - Message broker
+  redis:
+    image: redis:7-alpine
+    container_name: jobqueue-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - jobqueue-network
+
+  # PostgreSQL - Task metadata and results
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobqueue-postgres
+    environment:
+      POSTGRES_DB: jobqueue
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobqueue"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - jobqueue-network
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobqueue-api
+    command: python -m jobqueue.api.main
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: jobqueue
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue123
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - jobqueue-network
+    restart: unless-stopped
+
+  # Worker 1
+  worker1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobqueue-worker1
+    command: python -m jobqueue.worker.main
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: jobqueue
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue123
+      WORKER_CONCURRENCY: 4
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - jobqueue-network
+    restart: unless-stopped
+
+  # Worker 2
+  worker2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobqueue-worker2
+    command: python -m jobqueue.worker.main
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: jobqueue
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue123
+      WORKER_CONCURRENCY: 4
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - jobqueue-network
+    restart: unless-stopped
+
+  # Worker 3
+  worker3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobqueue-worker3
+    command: python -m jobqueue.worker.main
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: jobqueue
+      POSTGRES_USER: jobqueue
+      POSTGRES_PASSWORD: jobqueue123
+      WORKER_CONCURRENCY: 4
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - jobqueue-network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  jobqueue-network:
+    driver: bridge
