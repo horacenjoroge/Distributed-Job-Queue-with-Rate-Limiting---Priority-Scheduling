@@ -13,6 +13,7 @@ from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfig
+from jobqueue.core.dead_letter_queue import dead_letter_queue
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -411,6 +412,212 @@ async def list_all_rate_limits():
         return {"rate_limits": rate_limits}
     except Exception as e:
         log.error(f"Error listing rate limits: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/dlq", tags=["Dead Letter Queue"])
+async def get_dlq_tasks(limit: int = 100, offset: int = 0):
+    """
+    Get tasks from Dead Letter Queue.
+    
+    Args:
+        limit: Maximum number of tasks to retrieve (default: 100)
+        offset: Offset for pagination (default: 0)
+        
+    Returns:
+        List of DLQ tasks with metadata
+    """
+    try:
+        tasks = dead_letter_queue.get_tasks(limit=limit, offset=offset)
+        stats = dead_letter_queue.get_stats()
+        
+        return {
+            "tasks": tasks,
+            "total": stats["size"],
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        log.error(f"Error getting DLQ tasks: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/dlq/stats", tags=["Dead Letter Queue"])
+async def get_dlq_stats():
+    """
+    Get Dead Letter Queue statistics.
+    
+    Returns:
+        DLQ statistics including size, breakdowns, and alerts
+    """
+    try:
+        stats = dead_letter_queue.get_stats()
+        
+        # Check alert threshold (default: 100)
+        threshold = 100
+        exceeds_threshold, current_size = dead_letter_queue.check_alert_threshold(threshold)
+        
+        stats["alert_threshold"] = threshold
+        stats["exceeds_threshold"] = exceeds_threshold
+        
+        return stats
+    except Exception as e:
+        log.error(f"Error getting DLQ stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/dlq/{task_id}", tags=["Dead Letter Queue"])
+async def get_dlq_task(task_id: str):
+    """
+    Get a specific task from Dead Letter Queue by ID.
+    
+    Args:
+        task_id: Task ID
+        
+    Returns:
+        DLQ task entry
+    """
+    try:
+        entry = dead_letter_queue.get_task_by_id(task_id)
+        
+        if not entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task {task_id} not found in Dead Letter Queue"
+            )
+        
+        return entry
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting DLQ task: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.post("/dlq/{task_id}/retry", tags=["Dead Letter Queue"])
+async def retry_dlq_task(task_id: str, reset_retry_count: bool = True):
+    """
+    Retry a task from Dead Letter Queue.
+    
+    Args:
+        task_id: Task ID to retry
+        reset_retry_count: Reset retry count to 0 (default: True)
+        
+    Returns:
+        Retried task information
+    """
+    try:
+        task = dead_letter_queue.retry_task(task_id, reset_retry_count=reset_retry_count)
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task {task_id} not found in Dead Letter Queue"
+            )
+        
+        return {
+            "message": f"Task {task_id} retried successfully",
+            "task_id": task.id,
+            "task_name": task.name,
+            "reset_retry_count": reset_retry_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error retrying DLQ task: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/dlq", tags=["Dead Letter Queue"])
+async def purge_dlq():
+    """
+    Purge all tasks from Dead Letter Queue.
+    
+    Returns:
+        Number of tasks purged
+    """
+    try:
+        count = dead_letter_queue.purge()
+        
+        return {
+            "message": f"Purged {count} tasks from Dead Letter Queue",
+            "purged_count": count
+        }
+    except Exception as e:
+        log.error(f"Error purging DLQ: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/dlq/{task_id}", tags=["Dead Letter Queue"])
+async def remove_dlq_task(task_id: str):
+    """
+    Remove a specific task from Dead Letter Queue.
+    
+    Args:
+        task_id: Task ID to remove
+    """
+    try:
+        success = dead_letter_queue.remove_task(task_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task {task_id} not found in Dead Letter Queue"
+            )
+        
+        return {
+            "message": f"Task {task_id} removed from Dead Letter Queue"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error removing DLQ task: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/dlq/alerts", tags=["Dead Letter Queue"])
+async def check_dlq_alerts(threshold: int = 100):
+    """
+    Check if Dead Letter Queue exceeds threshold.
+    
+    Args:
+        threshold: Alert threshold (default: 100)
+        
+    Returns:
+        Alert status and current size
+    """
+    try:
+        exceeds, size = dead_letter_queue.check_alert_threshold(threshold)
+        
+        return {
+            "exceeds_threshold": exceeds,
+            "current_size": size,
+            "threshold": threshold,
+            "alert": exceeds
+        }
+    except Exception as e:
+        log.error(f"Error checking DLQ alerts: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
