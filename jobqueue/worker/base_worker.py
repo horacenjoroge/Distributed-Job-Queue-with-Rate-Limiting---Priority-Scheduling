@@ -4,6 +4,7 @@ Basic worker implementation for processing tasks.
 import os
 import socket
 from typing import Optional
+from datetime import datetime
 from jobqueue.utils.logger import log
 
 
