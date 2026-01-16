@@ -2,6 +2,8 @@
 Simple worker implementation with queue integration.
 """
 import time
+import signal
+import sys
 from typing import Optional
 from datetime import datetime
 from jobqueue.worker.base_worker import Worker
@@ -42,6 +44,10 @@ class SimpleWorker(Worker):
         self.queue = None
         self.tasks_processed = 0
         self.tasks_failed = 0
+        self.current_task = None
+        
+        # Setup signal handlers for graceful shutdown
+        self._setup_signal_handlers()
         
         log.info(
             f"SimpleWorker initialized",
@@ -51,6 +57,34 @@ class SimpleWorker(Worker):
                 "poll_timeout": poll_timeout
             }
         )
+    
+    def _setup_signal_handlers(self):
+        """Setup signal handlers for graceful shutdown."""
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGINT, self._signal_handler)
+        
+        log.debug("Signal handlers registered for SIGTERM and SIGINT")
+    
+    def _signal_handler(self, signum, frame):
+        """
+        Handle shutdown signals gracefully.
+        
+        Args:
+            signum: Signal number
+            frame: Current stack frame
+        """
+        signal_name = signal.Signals(signum).name
+        
+        log.info(
+            f"Worker {self.worker_id} received {signal_name}, shutting down gracefully...",
+            extra={"signal": signal_name, "signum": signum}
+        )
+        
+        # Stop the worker
+        self.stop()
+        
+        # Exit cleanly
+        sys.exit(0)
     
     def start(self):
         """Start the worker and connect to Redis."""
@@ -66,13 +100,33 @@ class SimpleWorker(Worker):
         super().start()
     
     def stop(self):
-        """Stop the worker and disconnect."""
+        """
+        Stop the worker gracefully.
+        Waits for current task to complete if any.
+        """
+        log.info(f"Gracefully stopping worker {self.worker_id}")
+        
+        if self.current_task:
+            log.info(
+                f"Waiting for current task {self.current_task.id} to complete",
+                extra={"task_id": self.current_task.id}
+            )
+        
         super().stop()
         
         # Disconnect from Redis
         if redis_broker.is_connected():
             redis_broker.disconnect()
             log.info(f"Worker {self.worker_id} disconnected from Redis")
+        
+        # Log final statistics
+        log.info(
+            f"Worker {self.worker_id} stopped",
+            extra={
+                "tasks_processed": self.tasks_processed,
+                "tasks_failed": self.tasks_failed
+            }
+        )
     
     def run_loop(self):
         """
@@ -99,7 +153,9 @@ class SimpleWorker(Worker):
                     extra={"task_id": task.id, "task_name": task.name}
                 )
                 
+                self.current_task = task
                 self.process_task(task)
+                self.current_task = None
                 self.tasks_processed += 1
                 
             except Exception as e:
