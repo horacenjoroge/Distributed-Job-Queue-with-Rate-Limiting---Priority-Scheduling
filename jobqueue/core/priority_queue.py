@@ -464,6 +464,149 @@ class PriorityQueue:
         
         return starved_tasks
     
+    def change_task_priority(self, task_id: str, new_priority: TaskPriority) -> bool:
+        """
+        Dynamically change the priority of a queued task.
+        
+        Args:
+            task_id: Task ID to update
+            new_priority: New priority level
+            
+        Returns:
+            True if task was found and updated
+            
+        Example:
+            # Escalate a low priority task
+            queue.change_task_priority(task_id, TaskPriority.HIGH)
+        """
+        all_tasks_data = redis_broker.client.zrange(
+            self._queue_key,
+            0, -1,
+            withscores=True
+        )
+        
+        for task_json, old_score in all_tasks_data:
+            task = Task.from_json(task_json)
+            if task.id == task_id:
+                # Remove old entry
+                redis_broker.client.zrem(self._queue_key, task_json)
+                
+                # Update priority
+                old_priority = task.priority
+                task.priority = new_priority
+                
+                # Re-enqueue with new priority
+                new_score = self._calculate_score(task.priority, task.created_at.timestamp())
+                new_task_json = task.to_json()
+                redis_broker.client.zadd(self._queue_key, {new_task_json: new_score})
+                
+                log.info(
+                    f"Changed priority for task {task_id}",
+                    extra={
+                        "task_id": task_id,
+                        "old_priority": old_priority,
+                        "new_priority": new_priority,
+                        "old_score": old_score,
+                        "new_score": new_score
+                    }
+                )
+                
+                return True
+        
+        log.warning(f"Task {task_id} not found for priority change")
+        return False
+    
+    def bulk_change_priority(
+        self,
+        task_ids: List[str],
+        new_priority: TaskPriority
+    ) -> int:
+        """
+        Change priority for multiple tasks at once.
+        
+        Args:
+            task_ids: List of task IDs to update
+            new_priority: New priority level for all tasks
+            
+        Returns:
+            Number of tasks successfully updated
+        """
+        updated_count = 0
+        
+        for task_id in task_ids:
+            if self.change_task_priority(task_id, new_priority):
+                updated_count += 1
+        
+        log.info(
+            f"Bulk priority change: {updated_count}/{len(task_ids)} tasks updated",
+            extra={
+                "queue": self.name,
+                "updated": updated_count,
+                "total": len(task_ids),
+                "new_priority": new_priority
+            }
+        )
+        
+        return updated_count
+    
+    def promote_task(self, task_id: str) -> bool:
+        """
+        Promote a task to the next higher priority level.
+        
+        Args:
+            task_id: Task ID to promote
+            
+        Returns:
+            True if task was promoted
+        """
+        all_tasks_data = redis_broker.client.zrange(self._queue_key, 0, -1)
+        
+        for task_json in all_tasks_data:
+            task = Task.from_json(task_json)
+            if task.id == task_id:
+                # Determine new priority
+                if task.priority == TaskPriority.LOW:
+                    new_priority = TaskPriority.MEDIUM
+                elif task.priority == TaskPriority.MEDIUM:
+                    new_priority = TaskPriority.HIGH
+                else:
+                    # Already at highest priority
+                    log.info(f"Task {task_id} already at HIGH priority")
+                    return False
+                
+                return self.change_task_priority(task_id, new_priority)
+        
+        return False
+    
+    def demote_task(self, task_id: str) -> bool:
+        """
+        Demote a task to the next lower priority level.
+        
+        Args:
+            task_id: Task ID to demote
+            
+        Returns:
+            True if task was demoted
+        """
+        all_tasks_data = redis_broker.client.zrange(self._queue_key, 0, -1)
+        
+        for task_json in all_tasks_data:
+            task = Task.from_json(task_json)
+            if task.id == task_id:
+                # Determine new priority
+                if task.priority == TaskPriority.HIGH:
+                    new_priority = TaskPriority.MEDIUM
+                elif task.priority == TaskPriority.MEDIUM:
+                    new_priority = TaskPriority.LOW
+                else:
+                    # Already at lowest priority
+                    log.info(f"Task {task_id} already at LOW priority")
+                    return False
+                
+                return self.change_task_priority(task_id, new_priority)
+        
+        return False
+    
     def __repr__(self) -> str:
         """String representation."""
         return f"PriorityQueue(name='{self.name}', size={self.size()})"
