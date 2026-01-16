@@ -41,28 +41,99 @@ class PriorityQueue:
         """Get the Redis key for this queue."""
         return self._queue_key
     
-    def _calculate_score(self, priority: TaskPriority, timestamp: Optional[float] = None) -> float:
+    def _calculate_score(
+        self,
+        priority: TaskPriority,
+        timestamp: Optional[float] = None,
+        age_boost: float = 0.0
+    ) -> float:
         """
         Calculate priority score for sorted set.
-        Score = priority_weight - timestamp (for FIFO within same priority)
+        Score combines priority weight and timestamp for FIFO ordering.
+        
+        Formula: score = priority_weight - (timestamp / 1000000) + age_boost
+        
+        The division by 1000000 ensures timestamp doesn't overwhelm priority.
+        Earlier tasks get slightly higher scores within same priority (FIFO).
         
         Args:
-            priority: Task priority
-            timestamp: Task timestamp (defaults to current time)
+            priority: Task priority level
+            timestamp: Task creation timestamp (defaults to current time)
+            age_boost: Additional boost for aged tasks (starvation prevention)
             
         Returns:
             Score for sorted set (higher score = higher priority)
+            
+        Example:
+            HIGH task at t=1000: score = 1000 - (1000/1000000) = 999.999
+            HIGH task at t=2000: score = 1000 - (2000/1000000) = 999.998
+            (First task has higher score, maintaining FIFO)
         """
         if timestamp is None:
             timestamp = time.time()
         
-        priority_weight = self.PRIORITY_WEIGHTS.get(priority, self.PRIORITY_WEIGHTS[TaskPriority.MEDIUM])
+        priority_weight = self.PRIORITY_WEIGHTS.get(
+            priority,
+            self.PRIORITY_WEIGHTS[TaskPriority.MEDIUM]
+        )
         
-        # Subtract timestamp so earlier tasks have higher score within same priority
-        # Use negative timestamp to maintain FIFO order
-        score = priority_weight - timestamp
+        # Normalize timestamp to small value to maintain priority ordering
+        # while preserving FIFO within same priority
+        normalized_timestamp = timestamp / 1000000.0
+        
+        # Calculate score: priority - timestamp (earlier = higher) + age boost
+        score = priority_weight - normalized_timestamp + age_boost
+        
+        log.debug(
+            f"Calculated score: {score}",
+            extra={
+                "priority": priority,
+                "priority_weight": priority_weight,
+                "timestamp": timestamp,
+                "age_boost": age_boost
+            }
+        )
         
         return score
+    
+    def recalculate_score(self, task_id: str) -> bool:
+        """
+        Recalculate and update score for a task (for priority adjustment).
+        
+        Args:
+            task_id: Task ID to update
+            
+        Returns:
+            True if task was found and updated
+        """
+        # Get all tasks to find the one to update
+        all_tasks_data = redis_broker.client.zrange(
+            self._queue_key,
+            0, -1,
+            withscores=True
+        )
+        
+        for task_json, old_score in all_tasks_data:
+            task = Task.from_json(task_json)
+            if task.id == task_id:
+                # Calculate new score
+                new_score = self._calculate_score(task.priority, task.created_at.timestamp())
+                
+                # Update in sorted set
+                redis_broker.client.zadd(self._queue_key, {task_json: new_score})
+                
+                log.info(
+                    f"Recalculated score for task {task_id}",
+                    extra={
+                        "task_id": task_id,
+                        "old_score": old_score,
+                        "new_score": new_score
+                    }
+                )
+                
+                return True
+        
+        return False
     
     def enqueue(self, task: Task) -> str:
         """
