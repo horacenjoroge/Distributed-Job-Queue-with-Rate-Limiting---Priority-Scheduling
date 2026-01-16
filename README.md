@@ -707,12 +707,90 @@ python -m jobqueue.core.worker_monitor
 
 #### Task Recovery
 
-When a worker dies mid-task, the monitor automatically:
+The system automatically recovers tasks from crashed workers using active task tracking and orphaned task detection:
 
-1. Detects the dead worker (no heartbeat for 30s)
-2. Finds all tasks assigned to that worker
-3. Re-queues tasks with reset status (PENDING)
-4. Tasks can then be picked up by other workers
+```python
+from jobqueue.core.task_recovery import task_recovery
+
+# Get orphaned tasks (tasks from dead workers)
+orphaned = task_recovery.get_orphaned_tasks()
+
+# Recover all orphaned tasks
+recovered_count = task_recovery.recover_orphaned_tasks()
+print(f"Recovered {recovered_count} tasks")
+```
+
+**How It Works:**
+
+1. **Active Task Tracking**: When a worker starts a task, it's added to `worker:{id}:active` Redis set
+2. **Task Locking**: Each task gets a lock (`task:lock:{task_id}`) to prevent duplicate execution
+3. **Orphaned Detection**: Monitor scans for tasks in dead workers' active sets
+4. **Recovery**: Orphaned tasks are re-queued with PENDING status
+5. **Lock Mechanism**: Recovery locks prevent duplicate recovery by multiple monitors
+
+**Recovery Process:**
+
+```python
+# Worker starts task
+task_recovery.add_active_task(worker_id, task)
+
+# Worker crashes (stops sending heartbeats)
+# Monitor detects dead worker after stale threshold
+
+# Monitor recovers orphaned tasks
+recovered = task_recovery.recover_orphaned_tasks()
+# Tasks are re-queued and can be picked up by other workers
+```
+
+**Recovery Statistics:**
+
+```python
+# Get recovery statistics
+stats = task_recovery.get_recovery_stats()
+
+print(f"Orphaned tasks: {stats['orphaned_tasks']}")
+print(f"By worker: {stats['by_worker']}")
+print(f"By queue: {stats['by_queue']}")
+```
+
+**Prevent Duplicate Execution:**
+
+The lock mechanism ensures tasks aren't executed twice:
+
+```python
+# Check if task is locked
+is_locked = task_recovery.is_task_locked(task_id)
+
+# Get lock owner
+owner = task_recovery.get_task_lock_owner(task_id)
+```
+
+**Test Case: Crash Worker, Verify Task Recovery**
+
+```python
+# 1. Worker starts processing task
+task_recovery.add_active_task(worker_id, task)
+
+# 2. Worker crashes (stops sending heartbeats)
+# Wait for stale threshold...
+
+# 3. Monitor detects orphaned task
+orphaned = task_recovery.get_orphaned_tasks()
+
+# 4. Task is recovered and re-queued
+recovered = task_recovery.recover_orphaned_tasks()
+assert recovered == 1
+assert queue.size() == 1  # Task re-queued
+```
+
+**Recovery Features:**
+
+- **Active Task Storage**: Tasks stored in Redis sets (`worker:{id}:active`)
+- **Orphaned Detection**: Automatic detection of tasks from dead workers
+- **Lock Mechanism**: Prevents duplicate execution and recovery
+- **Automatic Recovery**: Monitor automatically recovers orphaned tasks
+- **Statistics**: Track recovery metrics by worker and queue
+- **Safe Re-queuing**: Tasks reset to PENDING status before re-queuing
 
 #### Worker Dashboard API
 
