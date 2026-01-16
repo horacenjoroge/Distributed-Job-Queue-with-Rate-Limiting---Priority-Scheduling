@@ -597,6 +597,73 @@ curl -X DELETE http://localhost:8000/dlq
 curl http://localhost:8000/dlq/alerts?threshold=100
 ```
 
+### Task Timeouts
+
+Tasks that exceed their timeout limit are automatically killed and marked as TIMEOUT:
+
+```python
+from jobqueue.core.task import Task
+
+# Create task with timeout
+task = Task(
+    name="long_running_task",
+    args=[data],
+    timeout=300  # 5 minutes
+)
+
+# Task will be killed if it runs longer than 300 seconds
+```
+
+#### Soft vs Hard Timeouts
+
+- **Soft Timeout**: Warning logged at 80% of timeout (configurable)
+- **Hard Timeout**: Task killed when timeout exceeded
+
+```python
+from jobqueue.core.task_timeout import TimeoutManager
+
+# Create timeout manager
+manager = TimeoutManager(
+    timeout_seconds=300,
+    soft_timeout_ratio=0.8,  # 80% = 240 seconds
+    enable_soft_timeout=True
+)
+
+manager.start()
+
+# Check timeout status
+is_timed_out, soft_warning = manager.check()
+
+if soft_warning:
+    print("Task approaching timeout (soft warning)")
+
+if is_timed_out:
+    print("Task exceeded timeout (hard timeout)")
+```
+
+#### Timeout Features
+
+- **Automatic Enforcement**: Tasks killed when timeout exceeded
+- **Soft Timeout Warnings**: Alert at configurable threshold (default: 80%)
+- **Thread-Based**: Uses threading.Timer for timeout enforcement
+- **Process Tree Killing**: Kills child processes (requires psutil)
+- **Timeout Logging**: Detailed logs with elapsed time and timeout limits
+- **Status Tracking**: Tasks marked as TIMEOUT status
+- **Resource Cleanup**: Automatic cleanup after timeout
+
+#### Timeout Configuration
+
+```python
+# Disable timeout (0 = no timeout)
+task = Task(name="unlimited_task", timeout=0)
+
+# Short timeout (5 seconds)
+task = Task(name="quick_task", timeout=5)
+
+# Long timeout (1 hour)
+task = Task(name="batch_job", timeout=3600)
+```
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
