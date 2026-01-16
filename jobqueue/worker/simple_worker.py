@@ -18,6 +18,7 @@ from jobqueue.core.task_dependencies import task_dependency_graph
 from jobqueue.core.retry_backoff import default_backoff
 from jobqueue.core.scheduled_tasks import scheduled_task_store
 from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
+from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -222,6 +223,16 @@ class SimpleWorker(Worker):
         # Update status in dependency graph
         task_dependency_graph.set_task_status(task.id, TaskStatus.RUNNING)
         
+        # Initialize timeout manager
+        timeout_manager = None
+        if task.timeout > 0:
+            timeout_manager = TimeoutManager(
+                timeout_seconds=task.timeout,
+                soft_timeout_ratio=0.8,
+                enable_soft_timeout=True
+            )
+            timeout_manager.start()
+        
         try:
             # Get task function from registry
             task_func = task_registry.get_task(task.name)
@@ -235,12 +246,69 @@ class SimpleWorker(Worker):
                 extra={
                     "task_id": task.id,
                     "args": task.args,
-                    "kwargs": task.kwargs
+                    "kwargs": task.kwargs,
+                    "timeout": task.timeout
                 }
             )
             
-            # Execute (handles both sync and async functions)
-            result = execute_task_sync_or_async(task_func, *task.args, **task.kwargs)
+            # Execute with timeout monitoring
+            result = None
+            timeout_exceeded = False
+            
+            def execute_task():
+                """Execute task function."""
+                return execute_task_sync_or_async(task_func, *task.args, **task.kwargs)
+            
+            # Execute task in a thread with timeout
+            import threading
+            result_container = {"result": None, "exception": None}
+            
+            def run_task():
+                try:
+                    result_container["result"] = execute_task()
+                except Exception as e:
+                    result_container["exception"] = e
+            
+            task_thread = threading.Thread(target=run_task, daemon=True)
+            task_thread.start()
+            task_thread.join(timeout=task.timeout if task.timeout > 0 else None)
+            
+            # Check if task timed out
+            if task_thread.is_alive():
+                timeout_exceeded = True
+                log.error(
+                    f"Task {task.id} exceeded timeout of {task.timeout}s",
+                    extra={
+                        "task_id": task.id,
+                        "timeout": task.timeout,
+                        "elapsed": timeout_manager.get_elapsed_time() if timeout_manager else 0
+                    }
+                )
+                
+                # Mark as timeout
+                task.mark_timeout()
+                task_dependency_graph.set_task_status(task.id, TaskStatus.TIMEOUT)
+                
+                # Try to kill the thread (limited support in Python)
+                # Note: Python threads cannot be forcefully killed
+                # In production, consider using multiprocessing for true timeout enforcement
+                
+                raise TimeoutError(f"Task exceeded timeout of {task.timeout} seconds")
+            
+            # Check for exceptions
+            if result_container["exception"]:
+                raise result_container["exception"]
+            
+            result = result_container["result"]
+            
+            # Check timeout status
+            if timeout_manager:
+                is_timed_out, soft_warning = timeout_manager.check()
+                if is_timed_out:
+                    timeout_exceeded = True
+                    task.mark_timeout()
+                    task_dependency_graph.set_task_status(task.id, TaskStatus.TIMEOUT)
+                    raise TimeoutError(f"Task exceeded timeout of {task.timeout} seconds")
             
             # Task succeeded
             task.mark_success(result)
@@ -259,6 +327,38 @@ class SimpleWorker(Worker):
                     "execution_time": task.execution_time()
                 }
             )
+            
+        except TimeoutError as e:
+            # Task timed out
+            error_msg = str(e)
+            task.mark_timeout()
+            self.tasks_failed += 1
+            
+            # Store exception for DLQ
+            task._last_exception = e
+            
+            # Update status in dependency graph
+            task_dependency_graph.set_task_status(task.id, TaskStatus.TIMEOUT)
+            
+            # Cancel dependent tasks
+            self._cancel_dependent_tasks(task)
+            
+            # Log timeout with details
+            elapsed = timeout_manager.get_elapsed_time() if timeout_manager else 0
+            log.error(
+                f"Task {task.id} timed out after {elapsed:.2f}s (limit: {task.timeout}s)",
+                extra={
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "timeout": task.timeout,
+                    "elapsed": elapsed,
+                    "error": error_msg
+                }
+            )
+            
+            # Handle failure (retry or dead letter queue)
+            # Timeouts typically shouldn't be retried, but allow it if configured
+            self._handle_task_failure(task, exception=e)
             
         except Exception as e:
             # Task failed
@@ -289,6 +389,11 @@ class SimpleWorker(Worker):
             
             # Handle failure (retry or dead letter queue)
             self._handle_task_failure(task, exception=e)
+        
+        finally:
+            # Stop timeout manager
+            if timeout_manager:
+                timeout_manager.stop()
     
     def _store_result(self, task: Task):
         """
