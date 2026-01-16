@@ -3,6 +3,7 @@ Redis-based FIFO queue implementation using LIST data structure.
 """
 from typing import Optional
 from jobqueue.core.task import Task
+from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.utils.logger import log
 
@@ -39,21 +40,43 @@ class Queue:
             task: Task to enqueue
             
         Returns:
-            Task ID
+            Task ID (or existing task_id if duplicate found)
             
         Example:
             queue = Queue("default")
-            task = Task(name="process_data", args=[1, 2, 3])
+            task = Task(name="process_data", args=[1, 2, 3], unique=True)
             task_id = queue.enqueue(task)
         """
+        # Check for duplicates if task is marked as unique
+        if task.unique:
+            existing_task_id = task_deduplication.check_duplicate(
+                task,
+                allow_re_execution=False
+            )
+            
+            if existing_task_id:
+                log.info(
+                    f"Duplicate task detected, returning existing task_id",
+                    extra={
+                        "new_task_id": task.id,
+                        "existing_task_id": existing_task_id,
+                        "queue": self.name
+                    }
+                )
+                return existing_task_id
+        
         task_json = task.to_json()
         
         # LPUSH adds to the left (head) of the list
         redis_broker.client.lpush(self._queue_key, task_json)
         
+        # Register task for deduplication if unique
+        if task.unique:
+            task_deduplication.register_task(task)
+        
         log.debug(
             f"Enqueued task to {self.name}",
-            extra={"task_id": task.id, "queue": self.name}
+            extra={"task_id": task.id, "queue": self.name, "unique": task.unique}
         )
         
         return task.id
