@@ -12,6 +12,8 @@ from jobqueue.core.task import Task, TaskStatus
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.core.task_registry import task_registry
 from jobqueue.core.async_support import execute_task_sync_or_async
+from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
+from jobqueue.core.queue_config import queue_config_manager
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -131,11 +133,34 @@ class SimpleWorker(Worker):
     def run_loop(self):
         """
         Main worker loop - continuously pull and process tasks.
+        Respects rate limits before dequeuing tasks.
         """
         log.info(f"Worker {self.worker_id} entering main loop")
         
         while self.is_running:
             try:
+                # Check rate limit before dequeuing
+                rate_config = queue_config_manager.get_rate_limit(self.queue_name)
+                
+                if not rate_config.is_unlimited:
+                    # Try to acquire permission under rate limit
+                    can_proceed = distributed_rate_limiter.acquire(self.queue_name)
+                    
+                    if not can_proceed:
+                        # Rate limit hit, wait and retry
+                        wait_time = distributed_rate_limiter.wait_time_until_capacity(self.queue_name)
+                        
+                        log.info(
+                            f"Worker {self.worker_id} rate limit hit, sleeping {wait_time}s",
+                            extra={
+                                "queue": self.queue_name,
+                                "wait_time": wait_time
+                            }
+                        )
+                        
+                        time.sleep(min(wait_time + 0.1, self.poll_timeout))
+                        continue
+                
                 # Pull task from queue with timeout
                 task = self.queue.dequeue(timeout=self.poll_timeout)
                 
