@@ -4,6 +4,7 @@ Job queue implementation with priority and rate limiting.
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from jobqueue.core.task import Task, TaskStatus, TaskPriority
+from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.utils.logger import log
