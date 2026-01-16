@@ -80,6 +80,9 @@ class Task(BaseModel):
     task_signature: Optional[str] = None
     serialization_format: str = "json"
     
+    # Deduplication
+    unique: bool = False  # If True, prevent duplicate execution
+    
     class Config:
         use_enum_values = True
     
