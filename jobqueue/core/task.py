@@ -50,6 +50,7 @@ class Task(BaseModel):
     retry_count: int = 0
     max_retries: int = 3
     timeout: int = 300  # seconds
+    retry_history: List[Dict[str, Any]] = Field(default_factory=list)  # Track retry attempts
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -228,6 +229,23 @@ class Task(BaseModel):
         """Mark task as cancelled."""
         self.status = TaskStatus.CANCELLED
         self.completed_at = datetime.utcnow()
+    
+    def record_retry_attempt(self, error: str, backoff_seconds: float) -> None:
+        """
+        Record a retry attempt in the task history.
+        
+        Args:
+            error: Error message from failed attempt
+            backoff_seconds: Backoff delay before next retry
+        """
+        retry_record = {
+            "attempt": self.retry_count,
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": error,
+            "backoff_seconds": backoff_seconds,
+            "worker_id": self.worker_id
+        }
+        self.retry_history.append(retry_record)
     
     def get_queue_key(self) -> str:
         """Get the Redis queue key for this task."""
