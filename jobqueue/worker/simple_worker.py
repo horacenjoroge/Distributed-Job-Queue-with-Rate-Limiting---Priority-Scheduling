@@ -15,6 +15,8 @@ from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager
 from jobqueue.core.task_dependencies import task_dependency_graph
+from jobqueue.core.retry_backoff import default_backoff
+from jobqueue.core.scheduled_tasks import scheduled_task_store
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -316,7 +318,7 @@ class SimpleWorker(Worker):
     
     def _handle_task_failure(self, task: Task):
         """
-        Handle task failure - retry or move to dead letter queue.
+        Handle task failure - retry with exponential backoff or move to DLQ.
         
         Args:
             task: Failed task
@@ -324,27 +326,59 @@ class SimpleWorker(Worker):
         try:
             # Check if task can be retried
             if task.can_retry():
+                # Calculate exponential backoff delay
+                backoff_delay = default_backoff.calculate_delay(task.retry_count)
+                
+                # Record retry attempt in history
+                task.record_retry_attempt(
+                    error=task.error or "Unknown error",
+                    backoff_seconds=backoff_delay
+                )
+                
                 # Increment retry count
                 task.increment_retry()
                 
-                # Re-enqueue for retry
-                self.queue.enqueue(task)
-                
-                log.info(
-                    f"Task {task.id} re-queued for retry {task.retry_count}/{task.max_retries}",
-                    extra={
-                        "task_id": task.id,
-                        "retry_count": task.retry_count,
-                        "max_retries": task.max_retries
-                    }
-                )
+                # Schedule retry with backoff delay
+                if backoff_delay > 0:
+                    # Use countdown for delayed retry
+                    task.countdown = int(backoff_delay)
+                    task.set_schedule_time()
+                    
+                    # Schedule for future execution
+                    scheduled_task_store.schedule_task(task)
+                    
+                    log.info(
+                        f"Task {task.id} scheduled for retry with {backoff_delay:.2f}s backoff",
+                        extra={
+                            "task_id": task.id,
+                            "retry_count": task.retry_count,
+                            "max_retries": task.max_retries,
+                            "backoff_seconds": backoff_delay
+                        }
+                    )
+                else:
+                    # Immediate retry (no backoff)
+                    self.queue.enqueue(task)
+                    
+                    log.info(
+                        f"Task {task.id} re-queued for immediate retry",
+                        extra={
+                            "task_id": task.id,
+                            "retry_count": task.retry_count,
+                            "max_retries": task.max_retries
+                        }
+                    )
             else:
                 # Move to dead letter queue
                 self._move_to_dead_letter_queue(task)
                 
                 log.error(
                     f"Task {task.id} moved to dead letter queue after {task.max_retries} retries",
-                    extra={"task_id": task.id, "task_name": task.name}
+                    extra={
+                        "task_id": task.id,
+                        "task_name": task.name,
+                        "retry_history": task.retry_history
+                    }
                 )
                 
         except Exception as e:
