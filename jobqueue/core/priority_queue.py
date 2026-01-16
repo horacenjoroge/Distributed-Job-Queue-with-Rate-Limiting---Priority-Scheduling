@@ -21,20 +21,38 @@ class PriorityQueue:
         TaskPriority.LOW: 100
     }
     
-    def __init__(self, name: str = "default"):
+    def __init__(
+        self,
+        name: str = "default",
+        enable_aging: bool = True,
+        aging_threshold_seconds: float = 300.0,  # 5 minutes
+        aging_boost: float = 50.0
+    ):
         """
         Initialize priority queue.
         
         Args:
             name: Queue name
+            enable_aging: Enable age-based priority boost for starvation prevention
+            aging_threshold_seconds: Time after which tasks get age boost
+            aging_boost: Score boost for aged tasks
             
         Example:
-            queue = PriorityQueue("default")
+            queue = PriorityQueue("default", enable_aging=True)
         """
         self.name = name
         self._queue_key = f"priority_queue:{name}"
+        self.enable_aging = enable_aging
+        self.aging_threshold = aging_threshold_seconds
+        self.aging_boost = aging_boost
         
-        log.info(f"Initialized priority queue: {name}")
+        log.info(
+            f"Initialized priority queue: {name}",
+            extra={
+                "aging_enabled": enable_aging,
+                "aging_threshold": aging_threshold_seconds
+            }
+        )
     
     @property
     def queue_key(self) -> str:
@@ -341,6 +359,110 @@ class PriorityQueue:
     def is_empty(self) -> bool:
         """Check if queue is empty."""
         return self.size() == 0
+    
+    def apply_aging(self) -> int:
+        """
+        Apply age-based priority boost to prevent starvation.
+        Scans tasks and boosts priority of old LOW/MEDIUM priority tasks.
+        
+        Returns:
+            Number of tasks that received age boost
+            
+        Example:
+            # Run periodically to prevent starvation
+            boosted_count = queue.apply_aging()
+        """
+        if not self.enable_aging:
+            return 0
+        
+        current_time = time.time()
+        boosted_count = 0
+        
+        # Get all tasks with scores
+        all_tasks_data = redis_broker.client.zrange(
+            self._queue_key,
+            0, -1,
+            withscores=True
+        )
+        
+        for task_json, old_score in all_tasks_data:
+            task = Task.from_json(task_json)
+            
+            # Skip HIGH priority tasks (they don't need boost)
+            if task.priority == TaskPriority.HIGH:
+                continue
+            
+            # Calculate task age
+            task_age = current_time - task.created_at.timestamp()
+            
+            # Apply boost if task is old enough
+            if task_age > self.aging_threshold:
+                # Calculate age-based boost (more boost for older tasks)
+                age_multiplier = task_age / self.aging_threshold
+                boost = self.aging_boost * min(age_multiplier, 5.0)  # Cap at 5x boost
+                
+                # Recalculate score with boost
+                new_score = self._calculate_score(
+                    task.priority,
+                    task.created_at.timestamp(),
+                    age_boost=boost
+                )
+                
+                # Update score if it changed significantly
+                if abs(new_score - old_score) > 0.1:
+                    redis_broker.client.zadd(self._queue_key, {task_json: new_score})
+                    boosted_count += 1
+                    
+                    log.debug(
+                        f"Applied aging boost to task {task.id}",
+                        extra={
+                            "task_id": task.id,
+                            "priority": task.priority,
+                            "age_seconds": task_age,
+                            "boost": boost,
+                            "old_score": old_score,
+                            "new_score": new_score
+                        }
+                    )
+        
+        if boosted_count > 0:
+            log.info(
+                f"Applied aging to {boosted_count} tasks in queue {self.name}",
+                extra={"queue": self.name, "boosted_count": boosted_count}
+            )
+        
+        return boosted_count
+    
+    def get_starved_tasks(self, threshold_seconds: float = 600.0) -> List[Task]:
+        """
+        Get tasks that may be experiencing starvation.
+        
+        Args:
+            threshold_seconds: Time threshold to consider starved (default 10 min)
+            
+        Returns:
+            List of potentially starved tasks
+        """
+        current_time = time.time()
+        starved_tasks = []
+        
+        all_tasks_data = redis_broker.client.zrange(self._queue_key, 0, -1)
+        
+        for task_json in all_tasks_data:
+            task = Task.from_json(task_json)
+            task_age = current_time - task.created_at.timestamp()
+            
+            # Low/Medium priority tasks waiting too long are potentially starved
+            if task_age > threshold_seconds and task.priority != TaskPriority.HIGH:
+                starved_tasks.append(task)
+        
+        if starved_tasks:
+            log.warning(
+                f"Found {len(starved_tasks)} potentially starved tasks",
+                extra={"queue": self.name, "count": len(starved_tasks)}
+            )
+        
+        return starved_tasks
     
     def __repr__(self) -> str:
         """String representation."""
