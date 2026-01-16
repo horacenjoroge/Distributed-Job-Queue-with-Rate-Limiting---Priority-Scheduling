@@ -3,10 +3,13 @@ Simple worker implementation with queue integration.
 """
 import time
 from typing import Optional
+from datetime import datetime
 from jobqueue.worker.base_worker import Worker
 from jobqueue.core.redis_queue import Queue
-from jobqueue.core.task import Task
+from jobqueue.core.task import Task, TaskStatus
 from jobqueue.broker.redis_broker import redis_broker
+from jobqueue.core.task_registry import task_registry
+from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.utils.logger import log
 
 
@@ -109,8 +112,7 @@ class SimpleWorker(Worker):
     
     def process_task(self, task: Task):
         """
-        Process a single task.
-        This is a placeholder - will be enhanced in next commit.
+        Process a single task by executing its function.
         
         Args:
             task: Task to process
@@ -120,17 +122,55 @@ class SimpleWorker(Worker):
             extra={"task_id": task.id, "task_name": task.name}
         )
         
-        # TODO: Actual task execution will be implemented
-        # For now, just log that we received it
-        log.debug(
-            f"Task details",
-            extra={
-                "task_id": task.id,
-                "name": task.name,
-                "args": task.args,
-                "kwargs": task.kwargs
-            }
-        )
+        # Mark task as running
+        task.mark_running(self.worker_id)
+        task.started_at = datetime.utcnow()
+        
+        try:
+            # Get task function from registry
+            task_func = task_registry.get_task(task.name)
+            
+            if task_func is None:
+                raise ValueError(f"Task '{task.name}' not found in registry")
+            
+            # Execute the task function with args/kwargs
+            log.debug(
+                f"Executing task function: {task.name}",
+                extra={
+                    "task_id": task.id,
+                    "args": task.args,
+                    "kwargs": task.kwargs
+                }
+            )
+            
+            # Execute (handles both sync and async functions)
+            result = execute_task_sync_or_async(task_func, *task.args, **task.kwargs)
+            
+            # Task succeeded
+            task.mark_success(result)
+            
+            log.info(
+                f"Task {task.id} completed successfully",
+                extra={
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "execution_time": task.execution_time()
+                }
+            )
+            
+        except Exception as e:
+            # Task failed
+            error_msg = str(e)
+            task.mark_failed(error_msg)
+            
+            log.error(
+                f"Task {task.id} failed: {error_msg}",
+                extra={
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "error": error_msg
+                }
+            )
     
     def get_stats(self) -> dict:
         """
