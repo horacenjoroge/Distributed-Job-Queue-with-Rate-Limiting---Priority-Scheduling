@@ -3,7 +3,7 @@ Task models and status definitions.
 """
 from enum import Enum
 from typing import Optional, Any, List, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 import uuid
 import json
@@ -56,6 +56,17 @@ class Task(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
+    # Scheduling
+    eta: Optional[datetime] = None  # Execute after this time (absolute)
+    countdown: Optional[int] = None  # Execute in X seconds (relative)
+    schedule_time: Optional[datetime] = None  # Calculated execution time
+    
+    # Recurring tasks
+    cron_expression: Optional[str] = None  # Cron-like schedule
+    is_recurring: bool = False
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
+    
     # Worker information
     worker_id: Optional[str] = None
     
@@ -90,6 +101,39 @@ class Task(BaseModel):
     def compute_and_set_signature(self) -> None:
         """Compute and set the task signature."""
         self.task_signature = self.generate_signature()
+    
+    def calculate_schedule_time(self) -> Optional[datetime]:
+        """
+        Calculate the scheduled execution time based on eta or countdown.
+        
+        Returns:
+            Scheduled execution time, or None if not scheduled
+        """
+        if self.eta:
+            return self.eta
+        elif self.countdown:
+            return datetime.utcnow() + timedelta(seconds=self.countdown)
+        return None
+    
+    def set_schedule_time(self) -> None:
+        """Calculate and set the schedule_time field."""
+        self.schedule_time = self.calculate_schedule_time()
+    
+    def is_scheduled(self) -> bool:
+        """Check if task is scheduled for future execution."""
+        return self.schedule_time is not None or self.eta is not None or self.countdown is not None
+    
+    def is_ready_to_execute(self) -> bool:
+        """
+        Check if scheduled task is ready to execute.
+        
+        Returns:
+            True if task should be executed now
+        """
+        if not self.schedule_time:
+            return True  # Not scheduled, ready immediately
+        
+        return datetime.utcnow() >= self.schedule_time
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert task to dictionary for database storage."""
