@@ -21,6 +21,7 @@ from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
 from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
 from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.core.task_recovery import task_recovery
+from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
@@ -328,6 +329,10 @@ class SimpleWorker(Worker):
             # Update status in dependency graph
             task_dependency_graph.set_task_status(task.id, TaskStatus.SUCCESS)
             
+            # Update status in deduplication tracking
+            if task.unique:
+                task_deduplication.update_task_status(task)
+            
             # Store result in Redis with TTL using result backend
             result_backend.store_result(task)
             
@@ -351,6 +356,10 @@ class SimpleWorker(Worker):
             
             # Update status in dependency graph
             task_dependency_graph.set_task_status(task.id, TaskStatus.TIMEOUT)
+            
+            # Update status in deduplication tracking
+            if task.unique:
+                task_deduplication.update_task_status(task)
             
             # Cancel dependent tasks
             self._cancel_dependent_tasks(task)
@@ -383,6 +392,10 @@ class SimpleWorker(Worker):
             
             # Update status in dependency graph
             task_dependency_graph.set_task_status(task.id, TaskStatus.FAILED)
+            
+            # Update status in deduplication tracking
+            if task.unique:
+                task_deduplication.update_task_status(task)
             
             # Cancel dependent tasks if this task failed
             self._cancel_dependent_tasks(task)
