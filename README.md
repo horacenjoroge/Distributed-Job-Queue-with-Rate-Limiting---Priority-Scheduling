@@ -935,7 +935,133 @@ assert result.result == "Task completed"
 - **API Access**: REST endpoints for result retrieval
 - **TTL Management**: Extend or check remaining TTL
 
-## Configuration
+### Task Deduplication
+
+The system prevents duplicate task execution using task signatures (hash of name + args + kwargs):
+
+```python
+from jobqueue.core.task import Task
+from jobqueue.core.redis_queue import Queue
+
+# Create task with unique=True
+task = Task(
+    name="process_data",
+    args=[1, 2, 3],
+    kwargs={"key": "value"},
+    unique=True  # Enable deduplication
+)
+
+queue = Queue("default")
+task_id = queue.enqueue(task)
+```
+
+**How It Works:**
+
+1. **Task Signature**: Hash of task name + args + kwargs (SHA256)
+2. **Storage**: Signatures stored in Redis: `dedup:{signature}` with task_id
+3. **Duplicate Check**: On enqueue, check if signature exists
+4. **Pending Tasks**: If duplicate pending/running → return existing task_id
+5. **Completed Tasks**: If duplicate completed → optional re-execution
+
+**Task Signature:**
+
+```python
+# Generate signature
+task.compute_and_set_signature()
+signature = task.task_signature
+
+# Signature is hash of: name + args + kwargs
+print(f"Signature: {signature}")
+```
+
+**Deduplication API:**
+
+```python
+from jobqueue.core.task_deduplication import task_deduplication
+
+# Check for duplicate
+existing_task_id = task_deduplication.check_duplicate(
+    task,
+    allow_re_execution=False  # Prevent re-execution of completed tasks
+)
+
+# Register task for deduplication
+task_deduplication.register_task(task, ttl=86400)  # 24 hours
+
+# Update task status
+task_deduplication.update_task_status(task)
+
+# Get duplicate information
+info = task_deduplication.get_duplicate_info(signature)
+```
+
+**Enqueue Behavior:**
+
+```python
+# First enqueue
+task1 = Task(name="my_task", args=[1], unique=True)
+task_id1 = queue.enqueue(task1)  # Returns task1.id
+
+# Duplicate enqueue
+task2 = Task(name="my_task", args=[1], unique=True)
+task_id2 = queue.enqueue(task2)  # Returns task1.id (duplicate detected)
+
+assert task_id1 == task_id2  # Same task_id returned
+assert queue.size() == 1     # Only one task in queue
+```
+
+**REST API Endpoints:**
+
+```bash
+# Check for duplicate task
+GET /tasks/{task_id}/duplicate
+
+# Submit task with deduplication
+POST /tasks
+{
+  "task_name": "my_task",
+  "args": [1, 2, 3],
+  "unique": true
+}
+```
+
+**Test Case: Enqueue Same Task Twice, Verify Only Runs Once**
+
+```python
+# 1. Enqueue task with unique=True
+task1 = Task(name="process", args=[1], unique=True)
+task_id1 = queue.enqueue(task1)
+
+# 2. Enqueue same task again
+task2 = Task(name="process", args=[1], unique=True)
+task_id2 = queue.enqueue(task2)
+
+# 3. Verify only one task
+assert task_id1 == task_id2  # Same task_id returned
+assert queue.size() == 1     # Only one task in queue
+```
+
+**Deduplication Features:**
+
+- **Signature-Based**: Uses SHA256 hash of name + args + kwargs
+- **Configurable**: Enable per task with `unique=True`
+- **Status-Aware**: Handles pending, running, and completed tasks
+- **TTL Support**: Dedup keys expire after configurable time (default 24h)
+- **Re-Execution Control**: Optional re-execution of completed tasks
+- **Hash Collision Handling**: Detects potential collisions (extremely rare with SHA256)
+- **Queue Support**: Works with both FIFO and priority queues
+
+**TTL for Dedup Keys:**
+
+- **Default TTL**: 24 hours (86400 seconds)
+- **Configurable**: Can be set per task registration
+- **Automatic Expiration**: Stale entries removed after TTL
+- **Status Tracking**: Task status tracked separately with same TTL
+
+**Hash Collisions:**
+
+SHA256 collisions are extremely rare (practically impossible). The system includes collision detection that compares task details if the same signature maps to different tasks.
+
 
 All configuration is managed through environment variables. See `.env.example` for available options:
 
