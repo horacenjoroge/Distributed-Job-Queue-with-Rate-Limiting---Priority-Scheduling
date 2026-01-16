@@ -28,9 +28,20 @@ class Worker:
         self.queue_name = queue_name
         self.is_running = False
         
+        # Worker identification
+        self.hostname = socket.gethostname()
+        self.pid = os.getpid()
+        self.started_at = None
+        self.stopped_at = None
+        
         log.info(
             f"Worker initialized",
-            extra={"worker_id": self.worker_id, "queue": queue_name}
+            extra={
+                "worker_id": self.worker_id,
+                "hostname": self.hostname,
+                "pid": self.pid,
+                "queue": queue_name
+            }
         )
     
     def _generate_worker_id(self) -> str:
@@ -53,7 +64,17 @@ class Worker:
             worker = Worker()
             worker.start()
         """
-        log.info(f"Starting worker {self.worker_id}")
+        self.started_at = datetime.utcnow()
+        
+        log.info(
+            f"Starting worker {self.worker_id}",
+            extra={
+                "worker_id": self.worker_id,
+                "hostname": self.hostname,
+                "pid": self.pid,
+                "started_at": self.started_at.isoformat()
+            }
+        )
         self.is_running = True
         
         try:
@@ -73,8 +94,45 @@ class Worker:
         Example:
             worker.stop()
         """
-        log.info(f"Stopping worker {self.worker_id}")
+        self.stopped_at = datetime.utcnow()
+        
+        uptime = None
+        if self.started_at:
+            uptime = (self.stopped_at - self.started_at).total_seconds()
+        
+        log.info(
+            f"Stopping worker {self.worker_id}",
+            extra={
+                "worker_id": self.worker_id,
+                "hostname": self.hostname,
+                "pid": self.pid,
+                "uptime_seconds": uptime
+            }
+        )
         self.is_running = False
+    
+    def get_info(self) -> dict:
+        """
+        Get worker information.
+        
+        Returns:
+            Dictionary with worker details
+        """
+        info = {
+            "worker_id": self.worker_id,
+            "hostname": self.hostname,
+            "pid": self.pid,
+            "queue_name": self.queue_name,
+            "is_running": self.is_running,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None
+        }
+        
+        if self.started_at and self.is_running:
+            uptime = (datetime.utcnow() - self.started_at).total_seconds()
+            info["uptime_seconds"] = uptime
+        
+        return info
     
     def run_loop(self):
         """
