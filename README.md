@@ -229,6 +229,54 @@ print(f"By priority: {stats['queued_by_priority']}")
 print(f"By status: {stats['status_counts']}")
 ```
 
+### Rate Limiting
+
+Configure rate limits per queue to control task execution rates:
+
+```python
+from jobqueue.core.queue_config import queue_config_manager
+from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
+
+# Set rate limit: 100 tasks per minute with 20 burst capacity
+queue_config_manager.set_rate_limit(
+    queue_name="default",
+    max_tasks_per_minute=100,
+    burst_allowance=20,
+    enabled=True
+)
+
+# Get rate limit statistics
+stats = distributed_rate_limiter.get_stats("default")
+print(f"Current count: {stats['current_count']}")
+print(f"Remaining capacity: {stats['remaining_capacity']}")
+print(f"Burst used: {stats['burst_used']}")
+print(f"Wait time: {stats['wait_time_seconds']}s")
+```
+
+#### Rate Limiting Features
+
+- **Sliding Window**: Uses Redis sorted sets for accurate sliding window rate limiting
+- **Burst Allowance**: Allow temporary traffic spikes beyond the regular limit
+- **Distributed**: Atomic operations ensure correct behavior across multiple workers
+- **Per-Queue Configuration**: Each queue can have independent rate limits
+- **Dynamic Updates**: Change rate limits without restarting workers
+- **Admin API**: RESTful endpoints for monitoring and configuration
+
+Example with API:
+
+```bash
+# Configure rate limit via API
+curl -X PUT http://localhost:8000/queues/default/rate-limit \
+  -H "Content-Type: application/json" \
+  -d '{"max_tasks_per_minute": 100, "burst_allowance": 20, "enabled": true}'
+
+# Get rate limit stats
+curl http://localhost:8000/queues/default/rate-limit
+
+# Reset rate limit counters
+curl -X DELETE http://localhost:8000/queues/default/rate-limit
+```
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
