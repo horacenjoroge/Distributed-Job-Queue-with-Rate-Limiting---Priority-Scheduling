@@ -228,9 +228,16 @@ class Task(BaseModel):
         self.error = f"Task exceeded timeout of {self.timeout} seconds"
         self.completed_at = datetime.utcnow()
     
-    def mark_cancelled(self) -> None:
-        """Mark task as cancelled."""
+    def mark_cancelled(self, reason: Optional[str] = None) -> None:
+        """
+        Mark task as cancelled.
+        
+        Args:
+            reason: Cancellation reason
+        """
         self.status = TaskStatus.CANCELLED
+        if reason:
+            self.error = f"Cancelled: {reason}"
         self.completed_at = datetime.utcnow()
     
     def record_retry_attempt(self, error: str, backoff_seconds: float) -> None:

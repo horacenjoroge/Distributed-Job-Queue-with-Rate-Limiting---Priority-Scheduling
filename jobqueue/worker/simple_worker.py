@@ -22,6 +22,7 @@ from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
 from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.core.task_recovery import task_recovery
 from jobqueue.core.task_deduplication import task_deduplication
+from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
 from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
@@ -220,6 +221,18 @@ class SimpleWorker(Worker):
             if not self._check_dependencies(task):
                 return
         
+        # Check for cancellation before starting
+        should_cancel, force, reason = task_cancellation.should_cancel(task.id)
+        if should_cancel:
+            log.info(
+                f"Task {task.id} cancelled before execution",
+                extra={"task_id": task.id, "reason": reason}
+            )
+            task.mark_cancelled(reason)
+            task_dependency_graph.set_task_status(task.id, TaskStatus.CANCELLED)
+            task_cancellation.complete_cancellation(task.id)
+            return
+        
         # Mark task as running
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
@@ -276,15 +289,53 @@ class SimpleWorker(Worker):
             import threading
             result_container = {"result": None, "exception": None}
             
+            # Flag to track cancellation
+            cancellation_checked = {"cancelled": False, "reason": None, "force": False}
+            
             def run_task():
                 try:
+                    # Check for cancellation periodically during execution
+                    check_interval = 0.5  # Check every 0.5 seconds
+                    start_time = time.time()
+                    
+                    # For long-running tasks, we need to check cancellation
+                    # This is a simplified approach - in production, tasks should
+                    # check cancellation themselves in their loops
                     result_container["result"] = execute_task()
+                    
+                    # Check cancellation after execution
+                    should_cancel, force, reason = task_cancellation.should_cancel(task.id)
+                    if should_cancel:
+                        cancellation_checked["cancelled"] = True
+                        cancellation_checked["reason"] = reason
+                        cancellation_checked["force"] = force
+                        raise InterruptedError(f"Task cancelled: {reason}")
+                        
                 except Exception as e:
                     result_container["exception"] = e
             
             task_thread = threading.Thread(target=run_task, daemon=True)
             task_thread.start()
             task_thread.join(timeout=task.timeout if task.timeout > 0 else None)
+            
+            # Check for cancellation after thread completes
+            should_cancel, force, reason = task_cancellation.should_cancel(task.id)
+            if should_cancel or cancellation_checked["cancelled"]:
+                cancel_reason = reason or cancellation_checked["reason"]
+                log.info(
+                    f"Task {task.id} cancelled during execution",
+                    extra={"task_id": task.id, "reason": cancel_reason, "force": force}
+                )
+                task.mark_cancelled(cancel_reason)
+                task_dependency_graph.set_task_status(task.id, TaskStatus.CANCELLED)
+                task_cancellation.complete_cancellation(task.id)
+                
+                # Cancel dependent tasks
+                self._cancel_dependent_tasks(task)
+                
+                # Remove from active tasks
+                task_recovery.remove_active_task(self.worker_id, task)
+                return
             
             # Check if task timed out
             if task_thread.is_alive():
