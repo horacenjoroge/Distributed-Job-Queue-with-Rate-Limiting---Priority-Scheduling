@@ -20,6 +20,7 @@ from jobqueue.core.scheduled_tasks import scheduled_task_store
 from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
 from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
 from jobqueue.core.worker_heartbeat import WorkerStatus
+from jobqueue.core.task_recovery import task_recovery
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -221,7 +222,10 @@ class SimpleWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
-        # Store task as running for this worker (for recovery)
+        # Add to active tasks set (for recovery)
+        task_recovery.add_active_task(self.worker_id, task)
+        
+        # Store task as running for this worker (legacy, for compatibility)
         self._store_running_task(task)
         
         # Update worker status to ACTIVE
@@ -402,7 +406,10 @@ class SimpleWorker(Worker):
             if timeout_manager:
                 timeout_manager.stop()
             
-            # Remove task from running tasks
+            # Remove from active tasks set
+            task_recovery.remove_active_task(self.worker_id, task)
+            
+            # Remove task from running tasks (legacy)
             self._remove_running_task(task)
             
             # Update worker status back to IDLE
