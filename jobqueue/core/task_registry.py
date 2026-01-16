@@ -4,6 +4,7 @@ Task registry for registering and executing tasks.
 from typing import Callable, Dict, Any, Optional, List
 from jobqueue.utils.logger import log
 from jobqueue.core.decorators import is_task, get_task_metadata
+from jobqueue.core.validation import task_validator, ValidationError
 
 
 class TaskRegistry:
@@ -86,7 +87,7 @@ class TaskRegistry:
     
     def execute(self, name: str, *args, **kwargs) -> Any:
         """
-        Execute a registered task.
+        Execute a registered task with signature validation.
         
         Args:
             name: Task name
@@ -98,6 +99,7 @@ class TaskRegistry:
             
         Raises:
             ValueError: If task not found
+            ValidationError: If arguments don't match signature
             Exception: Any exception raised by the task
         """
         task_func = self.get_task(name)
@@ -105,12 +107,45 @@ class TaskRegistry:
         if task_func is None:
             raise ValueError(f"Task '{name}' not found in registry")
         
+        # Validate signature before execution
+        try:
+            task_validator.validate_task_signature(task_func, args, kwargs)
+        except ValidationError as e:
+            log.error(
+                f"Signature validation failed for task '{name}': {e}",
+                extra={"task": name, "args": args, "kwargs": kwargs}
+            )
+            raise
+        
         log.debug(
             f"Executing task: {name}",
             extra={"args": args, "kwargs": kwargs}
         )
         
         return task_func(*args, **kwargs)
+    
+    def validate_task_args(self, name: str, args: tuple, kwargs: dict) -> bool:
+        """
+        Validate arguments for a task without executing it.
+        
+        Args:
+            name: Task name
+            args: Positional arguments
+            kwargs: Keyword arguments
+            
+        Returns:
+            True if valid
+            
+        Raises:
+            ValueError: If task not found
+            ValidationError: If validation fails
+        """
+        task_func = self.get_task(name)
+        
+        if task_func is None:
+            raise ValueError(f"Task '{name}' not found in registry")
+        
+        return task_validator.validate_task_signature(task_func, args, kwargs)
     
     def list_tasks(self) -> list:
         """
