@@ -14,6 +14,7 @@ from jobqueue.core.task_registry import task_registry
 from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager
+from jobqueue.core.task_recovery import task_recovery
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -198,6 +199,9 @@ class PriorityWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
+        # Add to active tasks set (for recovery)
+        task_recovery.add_active_task(self.worker_id, task)
+        
         try:
             # Get task function from registry
             task_func = task_registry.get_task(task.name)
@@ -244,6 +248,10 @@ class PriorityWorker(Worker):
             
             # Handle failure
             self._handle_task_failure(task)
+        
+        finally:
+            # Remove from active tasks set
+            task_recovery.remove_active_task(self.worker_id, task)
     
     def _store_result(self, task: Task):
         """Store task result in Redis with TTL."""
