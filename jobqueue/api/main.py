@@ -14,6 +14,8 @@ from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfig
 from jobqueue.core.dead_letter_queue import dead_letter_queue
+from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
+from jobqueue.core.worker_monitor import WorkerMonitor
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -618,6 +620,149 @@ async def check_dlq_alerts(threshold: int = 100):
         }
     except Exception as e:
         log.error(f"Error checking DLQ alerts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/workers", tags=["Workers"])
+async def list_workers():
+    """
+    List all workers with their status.
+    
+    Returns:
+        List of worker information
+    """
+    try:
+        workers_info = worker_heartbeat.get_all_workers_info()
+        
+        return {
+            "workers": workers_info,
+            "total": len(workers_info),
+            "alive": len([w for w in workers_info if w["is_alive"]]),
+            "dead": len([w for w in workers_info if not w["is_alive"]])
+        }
+    except Exception as e:
+        log.error(f"Error listing workers: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/workers/{worker_id}", tags=["Workers"])
+async def get_worker(worker_id: str):
+    """
+    Get information about a specific worker.
+    
+    Args:
+        worker_id: Worker ID
+        
+    Returns:
+        Worker information
+    """
+    try:
+        worker_info = worker_heartbeat.get_worker_info(worker_id)
+        
+        if not worker_info.get("last_heartbeat"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker {worker_id} not found"
+            )
+        
+        return worker_info
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting worker: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/workers/stats", tags=["Workers"])
+async def get_worker_stats():
+    """
+    Get worker statistics and health summary.
+    
+    Returns:
+        Worker statistics
+    """
+    try:
+        all_workers = worker_heartbeat.get_all_workers()
+        workers_info = worker_heartbeat.get_all_workers_info()
+        
+        alive_workers = [w for w in workers_info if w["is_alive"]]
+        dead_workers = [w for w in workers_info if not w["is_alive"]]
+        
+        # Count by status
+        by_status = {}
+        for worker in workers_info:
+            status = worker["status"]
+            by_status[status] = by_status.get(status, 0) + 1
+        
+        # Count by queue
+        by_queue = {}
+        for worker in workers_info:
+            queue = worker.get("metadata", {}).get("queue_name", "unknown")
+            by_queue[queue] = by_queue.get(queue, 0) + 1
+        
+        return {
+            "total_workers": len(all_workers),
+            "alive_workers": len(alive_workers),
+            "dead_workers": len(dead_workers),
+            "by_status": by_status,
+            "by_queue": by_queue,
+            "workers": workers_info
+        }
+    except Exception as e:
+        log.error(f"Error getting worker stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/workers/monitor/stats", tags=["Workers"])
+async def get_monitor_stats():
+    """
+    Get worker monitor statistics.
+    
+    Returns:
+        Monitor statistics
+    """
+    try:
+        # Create temporary monitor instance to get stats
+        monitor = WorkerMonitor()
+        stats = monitor.get_stats()
+        
+        return stats
+    except Exception as e:
+        log.error(f"Error getting monitor stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/workers/{worker_id}", tags=["Workers"])
+async def remove_worker(worker_id: str):
+    """
+    Remove worker from tracking.
+    
+    Args:
+        worker_id: Worker ID to remove
+    """
+    try:
+        worker_heartbeat.remove_worker(worker_id)
+        
+        return {
+            "message": f"Worker {worker_id} removed from tracking"
+        }
+    except Exception as e:
+        log.error(f"Error removing worker: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
