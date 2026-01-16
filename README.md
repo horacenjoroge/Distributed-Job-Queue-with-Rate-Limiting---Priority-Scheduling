@@ -539,6 +539,64 @@ fib_delays = get_retry_delays(5, strategy="fibonacci", base=1.0)
 - **Scheduled Retries**: Uses scheduler for delayed execution
 - **Dead Letter Queue**: Failed tasks after max retries moved to DLQ
 
+### Dead Letter Queue
+
+Tasks that exceed maximum retry attempts are automatically moved to the Dead Letter Queue (DLQ):
+
+```python
+from jobqueue.core.dead_letter_queue import dead_letter_queue
+
+# View tasks in DLQ
+tasks = dead_letter_queue.get_tasks(limit=100, offset=0)
+
+# Get DLQ statistics
+stats = dead_letter_queue.get_stats()
+print(f"DLQ Size: {stats['size']}")
+print(f"By Task Name: {stats['by_task_name']}")
+print(f"By Queue: {stats['by_queue']}")
+
+# Retry a task from DLQ
+retried_task = dead_letter_queue.retry_task(task_id, reset_retry_count=True)
+
+# Check alert threshold
+exceeds, size = dead_letter_queue.check_alert_threshold(threshold=100)
+if exceeds:
+    print(f"Alert: DLQ size ({size}) exceeds threshold!")
+```
+
+#### DLQ Features
+
+- **Automatic Movement**: Tasks exceeding max retries automatically moved to DLQ
+- **Failure Details**: Stores failure reason and full stack trace
+- **Retry History**: Complete retry history preserved in DLQ entries
+- **Manual Retry**: Retry tasks from DLQ with optional retry count reset
+- **Statistics**: Breakdown by task name, queue, and timestamps
+- **Alerting**: Threshold-based alerts when DLQ size exceeds limit
+- **Pagination**: Efficient retrieval with limit and offset
+- **Purge**: Clear all tasks from DLQ
+
+#### Admin API
+
+```bash
+# Get DLQ tasks
+curl http://localhost:8000/dlq?limit=100&offset=0
+
+# Get DLQ statistics
+curl http://localhost:8000/dlq/stats
+
+# Get specific task
+curl http://localhost:8000/dlq/{task_id}
+
+# Retry task from DLQ
+curl -X POST http://localhost:8000/dlq/{task_id}/retry?reset_retry_count=true
+
+# Purge DLQ
+curl -X DELETE http://localhost:8000/dlq
+
+# Check alerts
+curl http://localhost:8000/dlq/alerts?threshold=100
+```
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
