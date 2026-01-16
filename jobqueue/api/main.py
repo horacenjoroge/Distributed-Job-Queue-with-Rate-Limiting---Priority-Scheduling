@@ -16,6 +16,7 @@ from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfi
 from jobqueue.core.dead_letter_queue import dead_letter_queue
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.core.worker_monitor import WorkerMonitor
+from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from config import settings
@@ -32,6 +33,7 @@ class TaskSubmitRequest(BaseModel):
     timeout: Optional[int] = None
     depends_on: Optional[List[str]] = None
     queue_name: str = "default"
+    unique: bool = False  # Enable deduplication
 
 
 class TaskResponse(BaseModel):
@@ -184,6 +186,10 @@ async def submit_task(request: TaskSubmitRequest):
             timeout=request.timeout,
             depends_on=request.depends_on,
         )
+        
+        # Set unique flag if requested
+        if request.unique:
+            task.unique = True
         
         return TaskResponse(
             id=task.id,
@@ -911,6 +917,60 @@ async def remove_worker(worker_id: str):
         }
     except Exception as e:
         log.error(f"Error removing worker: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/tasks/{task_id}/duplicate", tags=["Tasks"])
+async def check_duplicate_task(task_id: str):
+    """
+    Check if a task has duplicates.
+    
+    Args:
+        task_id: Task ID to check
+        
+    Returns:
+        Duplicate information if found
+    """
+    try:
+        queue = JobQueue()
+        task = queue.get_task(task_id)
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Task {task_id} not found"
+            )
+        
+        if not task.unique:
+            return {
+                "message": "Task is not marked as unique",
+                "unique": False
+            }
+        
+        if task.task_signature is None:
+            task.compute_and_set_signature()
+        
+        duplicate_info = task_deduplication.get_duplicate_info(task.task_signature)
+        
+        if duplicate_info:
+            return {
+                "has_duplicate": True,
+                "duplicate_task_id": duplicate_info["task_id"],
+                "duplicate_status": duplicate_info["status"],
+                "signature": duplicate_info["signature"]
+            }
+        
+        return {
+            "has_duplicate": False,
+            "signature": task.task_signature
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error checking duplicate: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
