@@ -17,6 +17,7 @@ from jobqueue.core.queue_config import queue_config_manager
 from jobqueue.core.task_dependencies import task_dependency_graph
 from jobqueue.core.retry_backoff import default_backoff
 from jobqueue.core.scheduled_tasks import scheduled_task_store
+from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -265,6 +266,9 @@ class SimpleWorker(Worker):
             task.mark_failed(error_msg)
             self.tasks_failed += 1
             
+            # Store exception for DLQ (if needed)
+            task._last_exception = e
+            
             # Update status in dependency graph
             task_dependency_graph.set_task_status(task.id, TaskStatus.FAILED)
             
@@ -284,7 +288,7 @@ class SimpleWorker(Worker):
             )
             
             # Handle failure (retry or dead letter queue)
-            self._handle_task_failure(task)
+            self._handle_task_failure(task, exception=e)
     
     def _store_result(self, task: Task):
         """
@@ -316,12 +320,13 @@ class SimpleWorker(Worker):
         except Exception as e:
             log.error(f"Failed to store result for task {task.id}: {e}")
     
-    def _handle_task_failure(self, task: Task):
+    def _handle_task_failure(self, task: Task, exception: Optional[Exception] = None):
         """
         Handle task failure - retry with exponential backoff or move to DLQ.
         
         Args:
             task: Failed task
+            exception: Exception that caused failure (for stack trace)
         """
         try:
             # Check if task can be retried
@@ -370,7 +375,7 @@ class SimpleWorker(Worker):
                     )
             else:
                 # Move to dead letter queue
-                self._move_to_dead_letter_queue(task)
+                self._move_to_dead_letter_queue(task, exception)
                 
                 log.error(
                     f"Task {task.id} moved to dead letter queue after {task.max_retries} retries",
@@ -384,27 +389,37 @@ class SimpleWorker(Worker):
         except Exception as e:
             log.error(f"Error handling task failure: {e}")
     
-    def _move_to_dead_letter_queue(self, task: Task):
+    def _move_to_dead_letter_queue(self, task: Task, exception: Optional[Exception] = None):
         """
-        Move failed task to dead letter queue.
+        Move failed task to dead letter queue with failure reason and stack trace.
         
         Args:
             task: Failed task
+            exception: Exception that caused failure (for stack trace)
         """
         try:
-            dlq_key = "dead_letter_queue"
-            task_json = task.to_json()
+            # Get failure reason
+            failure_reason = task.error or "Task exceeded maximum retry attempts"
             
-            # Add to dead letter queue with timestamp
-            redis_broker.client.lpush(dlq_key, task_json)
+            # Use stored exception if available
+            if exception is None and hasattr(task, '_last_exception'):
+                exception = task._last_exception
+            
+            # Add to Dead Letter Queue
+            add_to_dlq(task, failure_reason, exception)
             
             log.info(
-                f"Task {task.id} added to dead letter queue",
-                extra={"task_id": task.id, "error": task.error}
+                f"Task {task.id} added to Dead Letter Queue",
+                extra={
+                    "task_id": task.id,
+                    "error": task.error,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries
+                }
             )
             
         except Exception as e:
-            log.error(f"Failed to move task {task.id} to dead letter queue: {e}")
+            log.error(f"Failed to move task {task.id} to Dead Letter Queue: {e}")
     
     def get_result(self, task_id: str) -> Optional[Task]:
         """
