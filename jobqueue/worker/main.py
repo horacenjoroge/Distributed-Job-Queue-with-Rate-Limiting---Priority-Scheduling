@@ -5,13 +5,17 @@ import os
 import socket
 import signal
 import sys
+import multiprocessing
 from typing import Optional
 from datetime import datetime
 
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.core.task import Task, TaskStatus, TaskPriority
+from jobqueue.core.rate_limiter import rate_limiter
+from jobqueue.core.task_registry import task_registry
 from jobqueue.utils.logger import log
+from jobqueue.utils.retry import wait_with_backoff
 from config import settings
 
 
@@ -164,11 +168,18 @@ class Worker:
                 # Try to get task from each priority queue
                 task = None
                 for priority in priorities:
+                    # Check rate limit before processing
+                    if not rate_limiter.can_process("default", priority):
+                        log.debug(f"Rate limit reached for priority {priority}, skipping")
+                        continue
+                    
                     queue_key = f"queue:default:{priority}"
                     task_json = redis_broker.pop_task(queue_key, timeout=1)
                     
                     if task_json:
                         task = Task.from_json(task_json)
+                        # Increment rate limit counter
+                        rate_limiter.increment("default", priority)
                         break
                 
                 if task:
@@ -229,6 +240,26 @@ class Worker:
                 extra={"task_id": task.id, "execution_time": task.execution_time()}
             )
             
+        except TimeoutError as e:
+            log.error(f"Task {task.id} timed out: {e}")
+            
+            task.mark_timeout()
+            self._update_task_in_db(task)
+            
+            self.failed_tasks += 1
+            
+            # Handle retry logic for timeout
+            if task.can_retry():
+                # Wait with exponential backoff before retry
+                wait_with_backoff(task.retry_count)
+                task.increment_retry()
+                self._requeue_task(task)
+                log.info(f"Task {task.id} requeued after timeout, retry {task.retry_count}/{task.max_retries}")
+            else:
+                # Move to dead letter queue
+                self._move_to_dead_letter_queue(task)
+                log.error(f"Task {task.id} moved to dead letter queue after max retries (timeout)")
+        
         except Exception as e:
             log.error(f"Task {task.id} failed: {e}")
             
@@ -239,6 +270,8 @@ class Worker:
             
             # Handle retry logic
             if task.can_retry():
+                # Wait with exponential backoff before retry
+                wait_with_backoff(task.retry_count)
                 task.increment_retry()
                 self._requeue_task(task)
                 log.info(f"Task {task.id} requeued for retry {task.retry_count}/{task.max_retries}")
@@ -252,7 +285,7 @@ class Worker:
     
     def _execute_task(self, task: Task):
         """
-        Execute the actual task logic.
+        Execute the actual task logic with timeout.
         
         Args:
             task: Task to execute
@@ -260,14 +293,58 @@ class Worker:
         Returns:
             Task result
             
-        Note:
-            This is a placeholder. Actual implementation will involve
-            a task registry and dynamic task loading.
+        Raises:
+            ValueError: If task not found in registry
+            TimeoutError: If task execution exceeds timeout
+            Exception: Any exception raised by the task
         """
-        # TODO: Implement task registry and execution
-        # For now, just return a success message
         log.info(f"Executing task: {task.name} with args={task.args}, kwargs={task.kwargs}")
-        return {"status": "success", "message": f"Task {task.name} executed"}
+        
+        # Check if task is registered
+        if not task_registry.is_registered(task.name):
+            raise ValueError(f"Task '{task.name}' not found in registry")
+        
+        # Execute with timeout using multiprocessing
+        if task.timeout > 0:
+            result_queue = multiprocessing.Queue()
+            process = multiprocessing.Process(
+                target=self._run_task_in_process,
+                args=(task, result_queue)
+            )
+            
+            process.start()
+            process.join(timeout=task.timeout)
+            
+            if process.is_alive():
+                # Task exceeded timeout
+                process.terminate()
+                process.join()
+                raise TimeoutError(f"Task exceeded timeout of {task.timeout} seconds")
+            
+            if not result_queue.empty():
+                result = result_queue.get()
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            else:
+                raise Exception("Task process ended without returning a result")
+        else:
+            # Execute without timeout
+            return task_registry.execute(task.name, *task.args, **task.kwargs)
+    
+    def _run_task_in_process(self, task: Task, result_queue: multiprocessing.Queue):
+        """
+        Run task in a separate process for timeout enforcement.
+        
+        Args:
+            task: Task to execute
+            result_queue: Queue to store result
+        """
+        try:
+            result = task_registry.execute(task.name, *task.args, **task.kwargs)
+            result_queue.put(result)
+        except Exception as e:
+            result_queue.put(e)
     
     def _update_task_in_db(self, task: Task):
         """Update task in database."""
