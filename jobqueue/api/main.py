@@ -16,6 +16,7 @@ from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfi
 from jobqueue.core.dead_letter_queue import dead_letter_queue
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.core.worker_monitor import WorkerMonitor
+from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -72,6 +73,17 @@ class RateLimitStatsResponse(BaseModel):
     burst_remaining: int
     wait_time_seconds: float
     is_unlimited: bool
+
+
+class TaskResultResponse(BaseModel):
+    """Response model for task result."""
+    task_id: str
+    status: str
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration: Optional[float] = None
 
 
 # Initialize FastAPI app
@@ -251,6 +263,142 @@ async def cancel_task(task_id: str):
         raise
     except Exception as e:
         log.error(f"Error cancelling task: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/tasks/{task_id}/result", response_model=TaskResultResponse, tags=["Tasks"])
+async def get_task_result(task_id: str):
+    """
+    Get task result by task ID.
+    
+    Args:
+        task_id: Task ID
+        
+    Returns:
+        Task result information
+    """
+    try:
+        result = result_backend.get_result(task_id)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Result for task {task_id} not found or expired"
+            )
+        
+        return TaskResultResponse(
+            task_id=result.task_id,
+            status=result.status.value if isinstance(result.status, TaskStatus) else result.status,
+            result=result.result,
+            error=result.error,
+            started_at=result.started_at.isoformat() if result.started_at else None,
+            completed_at=result.completed_at.isoformat() if result.completed_at else None,
+            duration=result.duration
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error retrieving task result: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/tasks/{task_id}/result", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"])
+async def delete_task_result(task_id: str):
+    """
+    Delete task result from Redis.
+    
+    Args:
+        task_id: Task ID
+    """
+    try:
+        success = result_backend.delete_result(task_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Result for task {task_id} not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting task result: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/tasks/{task_id}/result/ttl", tags=["Tasks"])
+async def get_task_result_ttl(task_id: str):
+    """
+    Get remaining TTL for task result.
+    
+    Args:
+        task_id: Task ID
+        
+    Returns:
+        TTL information
+    """
+    try:
+        ttl = result_backend.get_result_ttl(task_id)
+        
+        if ttl is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Result for task {task_id} not found"
+            )
+        
+        return {
+            "task_id": task_id,
+            "ttl_seconds": ttl,
+            "ttl_hours": round(ttl / 3600, 2) if ttl > 0 else None,
+            "expired": ttl == -1 or ttl == 0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting result TTL: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.put("/tasks/{task_id}/result/ttl", tags=["Tasks"])
+async def extend_task_result_ttl(task_id: str, ttl_seconds: int):
+    """
+    Extend TTL for task result.
+    
+    Args:
+        task_id: Task ID
+        ttl_seconds: New TTL in seconds
+        
+    Returns:
+        Success message
+    """
+    try:
+        success = result_backend.extend_result_ttl(task_id, ttl_seconds)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Result for task {task_id} not found"
+            )
+        
+        return {
+            "message": f"TTL extended for task {task_id}",
+            "ttl_seconds": ttl_seconds
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error extending result TTL: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
