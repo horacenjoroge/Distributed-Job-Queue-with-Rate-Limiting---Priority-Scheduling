@@ -14,6 +14,7 @@ from jobqueue.core.task_registry import task_registry
 from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager
+from jobqueue.core.task_dependencies import task_dependency_graph
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -196,6 +197,7 @@ class SimpleWorker(Worker):
     def process_task(self, task: Task):
         """
         Process a single task by executing its function.
+        Checks dependencies before execution.
         
         Args:
             task: Task to process
@@ -205,9 +207,17 @@ class SimpleWorker(Worker):
             extra={"task_id": task.id, "task_name": task.name}
         )
         
+        # Check dependencies before processing
+        if task.depends_on:
+            if not self._check_dependencies(task):
+                return
+        
         # Mark task as running
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
+        
+        # Update status in dependency graph
+        task_dependency_graph.set_task_status(task.id, TaskStatus.RUNNING)
         
         try:
             # Get task function from registry
@@ -232,6 +242,9 @@ class SimpleWorker(Worker):
             # Task succeeded
             task.mark_success(result)
             
+            # Update status in dependency graph
+            task_dependency_graph.set_task_status(task.id, TaskStatus.SUCCESS)
+            
             # Store result in Redis with TTL
             self._store_result(task)
             
@@ -249,6 +262,12 @@ class SimpleWorker(Worker):
             error_msg = str(e)
             task.mark_failed(error_msg)
             self.tasks_failed += 1
+            
+            # Update status in dependency graph
+            task_dependency_graph.set_task_status(task.id, TaskStatus.FAILED)
+            
+            # Cancel dependent tasks if this task failed
+            self._cancel_dependent_tasks(task)
             
             # Log error with full details
             log.error(
@@ -375,6 +394,86 @@ class SimpleWorker(Worker):
         except Exception as e:
             log.error(f"Failed to retrieve result for task {task_id}: {e}")
             return None
+    
+    def _check_dependencies(self, task: Task) -> bool:
+        """
+        Check if task dependencies are satisfied.
+        If not, re-queue the task.
+        
+        Args:
+            task: Task to check
+            
+        Returns:
+            True if dependencies satisfied, False if re-queued
+        """
+        # Check for failed dependencies
+        has_failures, failed_deps = task_dependency_graph.has_failed_dependencies(task.id)
+        
+        if has_failures:
+            # Parent task(s) failed, cancel this task
+            log.warning(
+                f"Task {task.id} cancelled due to failed dependencies",
+                extra={
+                    "task_id": task.id,
+                    "failed_dependencies": failed_deps
+                }
+            )
+            
+            task.mark_failed(f"Cancelled: dependencies failed: {failed_deps}")
+            task_dependency_graph.set_task_status(task.id, TaskStatus.CANCELLED)
+            
+            # Cancel any dependent tasks
+            self._cancel_dependent_tasks(task)
+            
+            return False
+        
+        # Check if all dependencies are satisfied
+        satisfied, pending = task_dependency_graph.are_dependencies_satisfied(task.id)
+        
+        if not satisfied:
+            # Dependencies not ready, re-queue task
+            log.info(
+                f"Task {task.id} dependencies not satisfied, re-queuing",
+                extra={
+                    "task_id": task.id,
+                    "pending_dependencies": pending
+                }
+            )
+            
+            # Re-enqueue with a small delay
+            time.sleep(0.5)
+            self.queue.enqueue(task)
+            
+            return False
+        
+        # All dependencies satisfied
+        log.debug(
+            f"Task {task.id} dependencies satisfied",
+            extra={"task_id": task.id}
+        )
+        
+        return True
+    
+    def _cancel_dependent_tasks(self, task: Task) -> None:
+        """
+        Cancel all tasks that depend on this failed task.
+        
+        Args:
+            task: Failed task
+        """
+        try:
+            cancelled = task_dependency_graph.cancel_dependent_tasks(task.id)
+            
+            if cancelled:
+                log.warning(
+                    f"Cancelled {len(cancelled)} dependent tasks",
+                    extra={
+                        "parent_task": task.id,
+                        "cancelled_tasks": cancelled
+                    }
+                )
+        except Exception as e:
+            log.error(f"Error cancelling dependent tasks: {e}")
     
     def get_stats(self) -> dict:
         """
