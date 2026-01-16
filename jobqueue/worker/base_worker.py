@@ -3,8 +3,11 @@ Basic worker implementation for processing tasks.
 """
 import os
 import socket
+import threading
+import time
 from typing import Optional
 from datetime import datetime
+from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.utils.logger import log
 
 
@@ -34,6 +37,11 @@ class Worker:
         self.pid = os.getpid()
         self.started_at = None
         self.stopped_at = None
+        
+        # Heartbeat thread
+        self.heartbeat_thread: Optional[threading.Thread] = None
+        self.heartbeat_running = False
+        self.current_status = WorkerStatus.IDLE
         
         log.info(
             f"Worker initialized",
@@ -78,6 +86,9 @@ class Worker:
         )
         self.is_running = True
         
+        # Start heartbeat thread
+        self._start_heartbeat()
+        
         try:
             self.run_loop()
         except KeyboardInterrupt:
@@ -111,6 +122,9 @@ class Worker:
             }
         )
         self.is_running = False
+        
+        # Stop heartbeat thread
+        self._stop_heartbeat()
     
     def get_info(self) -> dict:
         """
@@ -151,6 +165,61 @@ class Worker:
             task: Task object to process
         """
         raise NotImplementedError("Subclasses must implement process_task()")
+    
+    def _start_heartbeat(self) -> None:
+        """Start heartbeat thread."""
+        self.heartbeat_running = True
+        self.heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            daemon=True,
+            name=f"heartbeat-{self.worker_id}"
+        )
+        self.heartbeat_thread.start()
+        
+        log.debug(f"Started heartbeat thread for worker {self.worker_id}")
+    
+    def _stop_heartbeat(self) -> None:
+        """Stop heartbeat thread."""
+        self.heartbeat_running = False
+        
+        if self.heartbeat_thread:
+            self.heartbeat_thread.join(timeout=2)
+        
+        log.debug(f"Stopped heartbeat thread for worker {self.worker_id}")
+    
+    def _heartbeat_loop(self) -> None:
+        """Heartbeat loop that runs in background thread."""
+        while self.heartbeat_running and self.is_running:
+            try:
+                # Send heartbeat with current status
+                metadata = {
+                    "hostname": self.hostname,
+                    "pid": self.pid,
+                    "queue_name": self.queue_name,
+                    "started_at": self.started_at.isoformat() if self.started_at else None
+                }
+                
+                worker_heartbeat.send_heartbeat(
+                    worker_id=self.worker_id,
+                    status=self.current_status,
+                    metadata=metadata
+                )
+                
+                # Sleep for heartbeat interval
+                time.sleep(worker_heartbeat.heartbeat_interval)
+                
+            except Exception as e:
+                log.error(f"Error sending heartbeat: {e}")
+                time.sleep(worker_heartbeat.heartbeat_interval)
+    
+    def set_status(self, status: WorkerStatus) -> None:
+        """
+        Update worker status.
+        
+        Args:
+            status: New worker status
+        """
+        self.current_status = status
     
     def __repr__(self) -> str:
         """String representation of worker."""

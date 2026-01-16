@@ -19,6 +19,7 @@ from jobqueue.core.retry_backoff import default_backoff
 from jobqueue.core.scheduled_tasks import scheduled_task_store
 from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
 from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
+from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -220,6 +221,9 @@ class SimpleWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
+        # Update worker status to ACTIVE
+        self.set_status(WorkerStatus.ACTIVE)
+        
         # Update status in dependency graph
         task_dependency_graph.set_task_status(task.id, TaskStatus.RUNNING)
         
@@ -394,6 +398,9 @@ class SimpleWorker(Worker):
             # Stop timeout manager
             if timeout_manager:
                 timeout_manager.stop()
+            
+            # Update worker status back to IDLE
+            self.set_status(WorkerStatus.IDLE)
     
     def _store_result(self, task: Task):
         """
