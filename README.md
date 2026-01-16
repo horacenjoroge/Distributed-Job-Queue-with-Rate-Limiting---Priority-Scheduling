@@ -277,6 +277,102 @@ curl http://localhost:8000/queues/default/rate-limit
 curl -X DELETE http://localhost:8000/queues/default/rate-limit
 ```
 
+### Task Scheduling
+
+Schedule tasks to run at specific times or with delays:
+
+```python
+from datetime import datetime, timedelta
+from jobqueue.core.task import Task
+from jobqueue.core.scheduled_tasks import scheduled_task_store
+from jobqueue.utils.timezone import schedule_task_at_time
+
+# Schedule with absolute time (eta)
+eta = datetime.utcnow() + timedelta(hours=2)
+task = Task(
+    name="send_reminder",
+    args=["user@example.com"],
+    eta=eta
+)
+
+# Schedule with countdown (relative time)
+task = Task(
+    name="process_data",
+    args=[123],
+    countdown=300  # Execute in 5 minutes
+)
+
+# Schedule for specific time in timezone
+eta = schedule_task_at_time(
+    hour=9,
+    minute=0,
+    tz_name="America/New_York",
+    days_ahead=1  # Tomorrow at 9 AM EST
+)
+task = Task(name="morning_report", eta=eta)
+```
+
+#### Recurring Tasks with Cron
+
+Create recurring tasks with cron-like expressions:
+
+```python
+from jobqueue.core.recurring_tasks import recurring_task_manager
+from jobqueue.core.task import TaskPriority
+
+# Daily at 2 AM
+recurring_task_manager.register_recurring_task(
+    name="daily_cleanup",
+    cron_expression="0 2 * * *",
+    task_name="cleanup_old_data",
+    priority=TaskPriority.LOW
+)
+
+# Every 5 minutes
+recurring_task_manager.register_recurring_task(
+    name="health_check",
+    cron_expression="*/5 * * * *",
+    task_name="check_system_health"
+)
+
+# Using shortcuts
+recurring_task_manager.register_recurring_task(
+    name="hourly_sync",
+    cron_expression="@hourly",
+    task_name="sync_data"
+)
+```
+
+#### Scheduler Process
+
+Run the scheduler to move ready tasks to execution queues:
+
+```python
+from jobqueue.core.scheduler import run_scheduler
+
+# Start scheduler (separate process from workers)
+run_scheduler(
+    poll_interval=1,  # Check every second
+    queues=["default", "scheduled"]
+)
+```
+
+Or via command line:
+
+```bash
+python -m jobqueue.core.scheduler
+```
+
+#### Scheduling Features
+
+- **ETA**: Schedule tasks for absolute execution time
+- **Countdown**: Schedule tasks with relative delay (seconds)
+- **Cron Expressions**: Standard cron syntax for recurring tasks
+- **Timezone Support**: Schedule in any timezone, stored as UTC
+- **Scheduler Process**: Separate process polls and moves ready tasks
+- **Recurring Tasks**: Automatic rescheduling with cron patterns
+- **Task Management**: Cancel, pause, resume scheduled tasks
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
