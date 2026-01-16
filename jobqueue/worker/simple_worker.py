@@ -41,6 +41,7 @@ class SimpleWorker(Worker):
         self.poll_timeout = poll_timeout
         self.queue = None
         self.tasks_processed = 0
+        self.tasks_failed = 0
         
         log.info(
             f"SimpleWorker initialized",
@@ -166,15 +167,22 @@ class SimpleWorker(Worker):
             # Task failed
             error_msg = str(e)
             task.mark_failed(error_msg)
+            self.tasks_failed += 1
             
+            # Log error with full details
             log.error(
                 f"Task {task.id} failed: {error_msg}",
                 extra={
                     "task_id": task.id,
                     "task_name": task.name,
-                    "error": error_msg
+                    "error": error_msg,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries
                 }
             )
+            
+            # Handle failure (retry or dead letter queue)
+            self._handle_task_failure(task)
     
     def _store_result(self, task: Task):
         """
@@ -205,6 +213,64 @@ class SimpleWorker(Worker):
             
         except Exception as e:
             log.error(f"Failed to store result for task {task.id}: {e}")
+    
+    def _handle_task_failure(self, task: Task):
+        """
+        Handle task failure - retry or move to dead letter queue.
+        
+        Args:
+            task: Failed task
+        """
+        try:
+            # Check if task can be retried
+            if task.can_retry():
+                # Increment retry count
+                task.increment_retry()
+                
+                # Re-enqueue for retry
+                self.queue.enqueue(task)
+                
+                log.info(
+                    f"Task {task.id} re-queued for retry {task.retry_count}/{task.max_retries}",
+                    extra={
+                        "task_id": task.id,
+                        "retry_count": task.retry_count,
+                        "max_retries": task.max_retries
+                    }
+                )
+            else:
+                # Move to dead letter queue
+                self._move_to_dead_letter_queue(task)
+                
+                log.error(
+                    f"Task {task.id} moved to dead letter queue after {task.max_retries} retries",
+                    extra={"task_id": task.id, "task_name": task.name}
+                )
+                
+        except Exception as e:
+            log.error(f"Error handling task failure: {e}")
+    
+    def _move_to_dead_letter_queue(self, task: Task):
+        """
+        Move failed task to dead letter queue.
+        
+        Args:
+            task: Failed task
+        """
+        try:
+            dlq_key = "dead_letter_queue"
+            task_json = task.to_json()
+            
+            # Add to dead letter queue with timestamp
+            redis_broker.client.lpush(dlq_key, task_json)
+            
+            log.info(
+                f"Task {task.id} added to dead letter queue",
+                extra={"task_id": task.id, "error": task.error}
+            )
+            
+        except Exception as e:
+            log.error(f"Failed to move task {task.id} to dead letter queue: {e}")
     
     def get_result(self, task_id: str) -> Optional[Task]:
         """
@@ -240,5 +306,6 @@ class SimpleWorker(Worker):
             "worker_id": self.worker_id,
             "queue_name": self.queue_name,
             "is_running": self.is_running,
-            "tasks_processed": self.tasks_processed
+            "tasks_processed": self.tasks_processed,
+            "tasks_failed": self.tasks_failed
         }
