@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 import uuid
 import json
+import hashlib
 
 
 class TaskStatus(str, Enum):
@@ -31,6 +32,7 @@ class TaskPriority(str, Enum):
 class Task(BaseModel):
     """
     Task model representing a unit of work to be executed.
+    Supports versioning, advanced serialization, and validation.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -61,11 +63,36 @@ class Task(BaseModel):
     parent_task_id: Optional[str] = None
     depends_on: List[str] = Field(default_factory=list)
     
+    # Versioning and metadata
+    version: str = "1.0"
+    task_signature: Optional[str] = None
+    serialization_format: str = "json"
+    
     class Config:
         use_enum_values = True
     
+    def generate_signature(self) -> str:
+        """
+        Generate a unique signature for task deduplication.
+        Based on task name, args, and kwargs.
+        
+        Returns:
+            SHA256 hash of task signature
+        """
+        signature_data = {
+            "name": self.name,
+            "args": str(self.args),
+            "kwargs": str(sorted(self.kwargs.items())),
+        }
+        signature_str = json.dumps(signature_data, sort_keys=True)
+        return hashlib.sha256(signature_str.encode()).hexdigest()
+    
+    def compute_and_set_signature(self) -> None:
+        """Compute and set the task signature."""
+        self.task_signature = self.generate_signature()
+    
     def to_dict(self) -> Dict[str, Any]:
-        """Convert task to dictionary."""
+        """Convert task to dictionary for database storage."""
         return {
             "id": self.id,
             "name": self.name,
@@ -176,3 +203,74 @@ class Task(BaseModel):
         if self.started_at and self.completed_at:
             return (self.completed_at - self.started_at).total_seconds()
         return None
+    
+    def serialize_with_format(self, format: str = "json") -> str:
+        """
+        Serialize task using advanced serializer.
+        
+        Args:
+            format: Serialization format ('json' or 'pickle')
+            
+        Returns:
+            Serialized task string
+        """
+        from jobqueue.core.serialization import task_serializer
+        
+        task_data = self.model_dump()
+        return task_serializer.serialize(task_data, format=format)
+    
+    @classmethod
+    def deserialize_with_format(cls, data: str, format: str = "json") -> "Task":
+        """
+        Deserialize task using advanced serializer.
+        
+        Args:
+            data: Serialized task string
+            format: Serialization format ('json' or 'pickle')
+            
+        Returns:
+            Task instance
+        """
+        from jobqueue.core.serialization import task_serializer
+        
+        task_data = task_serializer.deserialize(data, format=format)
+        return cls(**task_data)
+    
+    def validate_signature(self, func) -> bool:
+        """
+        Validate task args/kwargs against function signature.
+        
+        Args:
+            func: Function to validate against
+            
+        Returns:
+            True if valid
+            
+        Raises:
+            ValidationError: If validation fails
+        """
+        from jobqueue.core.validation import task_validator
+        
+        return task_validator.validate_task_signature(
+            func,
+            tuple(self.args),
+            self.kwargs
+        )
+    
+    def is_duplicate_of(self, other: "Task") -> bool:
+        """
+        Check if this task is a duplicate of another task.
+        Based on task signature.
+        
+        Args:
+            other: Other task to compare with
+            
+        Returns:
+            True if duplicate
+        """
+        if self.task_signature is None:
+            self.compute_and_set_signature()
+        if other.task_signature is None:
+            other.compute_and_set_signature()
+        
+        return self.task_signature == other.task_signature
