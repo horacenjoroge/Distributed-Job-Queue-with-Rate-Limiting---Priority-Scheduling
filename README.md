@@ -664,6 +664,81 @@ task = Task(name="quick_task", timeout=5)
 task = Task(name="batch_job", timeout=3600)
 ```
 
+### Worker Heartbeat & Health Monitoring
+
+Workers send heartbeats every 10 seconds to indicate they're alive. Dead workers are automatically detected and their tasks are recovered:
+
+```python
+from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
+
+# Get all workers
+workers = worker_heartbeat.get_all_workers_info()
+
+# Check worker status
+for worker in workers:
+    print(f"{worker['worker_id']}: {worker['status']} (alive: {worker['is_alive']})")
+```
+
+#### Worker Status
+
+- **ACTIVE**: Worker is currently processing a task
+- **IDLE**: Worker is running but not processing tasks
+- **DEAD**: Worker has not sent heartbeat in 30 seconds (stale)
+
+#### Dead Worker Detection
+
+The worker monitor process automatically detects dead workers:
+
+```python
+from jobqueue.core.worker_monitor import run_worker_monitor
+
+# Start monitor process (separate from workers)
+run_worker_monitor(
+    check_interval=10,  # Check every 10 seconds
+    stale_threshold=30  # Worker considered dead after 30s
+)
+```
+
+Or via command line:
+
+```bash
+python -m jobqueue.core.worker_monitor
+```
+
+#### Task Recovery
+
+When a worker dies mid-task, the monitor automatically:
+
+1. Detects the dead worker (no heartbeat for 30s)
+2. Finds all tasks assigned to that worker
+3. Re-queues tasks with reset status (PENDING)
+4. Tasks can then be picked up by other workers
+
+#### Worker Dashboard API
+
+```bash
+# List all workers
+curl http://localhost:8000/workers
+
+# Get specific worker
+curl http://localhost:8000/workers/{worker_id}
+
+# Get worker statistics
+curl http://localhost:8000/workers/stats
+
+# Get monitor statistics
+curl http://localhost:8000/workers/monitor/stats
+```
+
+#### Heartbeat Features
+
+- **Automatic Heartbeats**: Workers send heartbeat every 10 seconds
+- **Status Tracking**: ACTIVE when processing, IDLE when waiting
+- **Dead Detection**: Workers marked DEAD after 30s without heartbeat
+- **Task Recovery**: Automatic re-queuing of tasks from dead workers
+- **Worker Dashboard**: Real-time view of all workers and their status
+- **Metadata Storage**: Hostname, PID, queue, and start time tracked
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
