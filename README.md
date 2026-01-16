@@ -2,29 +2,29 @@
 
 A robust, production-ready distributed job queue system built from scratch in Python. This system provides advanced features like priority scheduling, rate limiting, task dependencies, dead letter queues, and comprehensive monitoring capabilities.
 
-## 🚀 Features
+## Features
 
 ### Core Features
-- ✅ **Custom Task Queue Implementation** - Built from scratch without using Celery
-- ✅ **Priority Queues** - High/Medium/Low priority task scheduling
-- ✅ **Rate Limiting** - Configurable rate limits per queue (max X tasks per minute)
-- ✅ **Dead Letter Queue** - Failed tasks automatically moved after N retries
-- ✅ **Task Chaining & Dependencies** - Task B runs only after Task A succeeds
-- ✅ **Distributed Workers** - Multiple workers across different machines
-- ✅ **Worker Health Monitoring** - Heartbeats and auto-restart capabilities
-- ✅ **Result Backend** - Store results in Redis with configurable TTL
-- ✅ **Exponential Backoff** - Intelligent retry mechanism with backoff
-- ✅ **Task Cancellation** - Cancel running or pending tasks
+- [x] **Custom Task Queue Implementation** - Built from scratch without using Celery
+- [x] **Priority Queues** - High/Medium/Low priority task scheduling
+- [x] **Rate Limiting** - Configurable rate limits per queue (max X tasks per minute)
+- [x] **Dead Letter Queue** - Failed tasks automatically moved after N retries
+- [x] **Task Chaining & Dependencies** - Task B runs only after Task A succeeds
+- [x] **Distributed Workers** - Multiple workers across different machines
+- [x] **Worker Health Monitoring** - Heartbeats and auto-restart capabilities
+- [x] **Result Backend** - Store results in Redis with configurable TTL
+- [x] **Exponential Backoff** - Intelligent retry mechanism with backoff
+- [x] **Task Cancellation** - Cancel running or pending tasks
 
 ### Advanced Features
-- ⏳ **Task Recovery** - Handle worker crashes mid-task
-- ⏳ **Task Deduplication** - Prevent duplicate task execution
-- ⏳ **Web UI** - Monitor queues and tasks via web interface
-- ⏳ **Connection Failure Handling** - Graceful handling of Redis/DB failures
-- ⏳ **Task Timeouts** - Automatically kill long-running tasks
-- ⏳ **Metrics & Observability** - Track duration, success rate, etc.
+- [ ] **Task Recovery** - Handle worker crashes mid-task
+- [ ] **Task Deduplication** - Prevent duplicate task execution
+- [ ] **Web UI** - Monitor queues and tasks via web interface
+- [ ] **Connection Failure Handling** - Graceful handling of Redis/DB failures
+- [ ] **Task Timeouts** - Automatically kill long-running tasks
+- [ ] **Metrics & Observability** - Track duration, success rate, etc.
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────┐
@@ -49,7 +49,7 @@ A robust, production-ready distributed job queue system built from scratch in Py
     └──────────────────────────┘
 ```
 
-## 📦 Project Structure
+## Project Structure
 
 ```
 jobqueue/
@@ -78,7 +78,7 @@ jobqueue/
     └── __init__.py
 ```
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **Language**: Python 3.11+
 - **Message Broker**: Redis 7
@@ -88,7 +88,7 @@ jobqueue/
 - **Logging**: loguru (structured logging)
 - **Containerization**: Docker & Docker Compose
 
-## 🚦 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -172,7 +172,7 @@ jobqueue/
    python -m jobqueue.worker.main
    ```
 
-## 📖 Usage Examples
+## Usage Examples
 
 ### Submitting Tasks
 
@@ -229,7 +229,7 @@ print(f"By priority: {stats['queued_by_priority']}")
 print(f"By status: {stats['status_counts']}")
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
 
@@ -262,7 +262,7 @@ All configuration is managed through environment variables. See `.env.example` f
 - `RATE_LIMIT_MEDIUM`: Medium priority rate limit (tasks/min, default: 500)
 - `RATE_LIMIT_LOW`: Low priority rate limit (tasks/min, default: 100)
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -275,7 +275,7 @@ pytest --cov=jobqueue --cov-report=html
 pytest tests/test_queue.py
 ```
 
-## 📊 Monitoring
+## Monitoring
 
 ### Database Tables
 
@@ -303,7 +303,7 @@ redis-cli ping
 psql -h localhost -U jobqueue -d jobqueue -c "SELECT 1"
 ```
 
-## 🔧 Development
+## Development
 
 ### Code Style
 
@@ -342,7 +342,7 @@ queue.submit_task(
 )
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -360,9 +360,9 @@ queue.submit_task(
    - Re-initialize schema: `postgres_backend.initialize_schema()`
    - Check PostgreSQL logs for errors
 
-## 🗺️ Roadmap
+## Roadmap
 
-### Phase 1: Core Queue Implementation ✅
+### Phase 1: Core Queue Implementation (Completed)
 - [x] Project setup and structure
 - [x] Redis connection manager
 - [x] PostgreSQL backend
@@ -398,11 +398,11 @@ queue.submit_task(
 - [ ] Performance optimization
 - [ ] Documentation completion
 
-## 📄 License
+## License
 
 MIT License - See LICENSE file for details
 
-## 👥 Contributing
+## Contributing
 
 Contributions are welcome! Please follow these steps:
 
@@ -412,10 +412,10 @@ Contributions are welcome! Please follow these steps:
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📞 Support
+## Support
 
 For issues, questions, or contributions, please open an issue on GitHub.
 
 ---
 
-**Built with ❤️ as a learning project to understand distributed systems, job queues, and production-grade Python applications.**
+**Built as a learning project to understand distributed systems, job queues, and production-grade Python applications.**
