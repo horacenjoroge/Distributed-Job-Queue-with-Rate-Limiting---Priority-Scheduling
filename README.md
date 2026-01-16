@@ -462,6 +462,83 @@ tasks = chord(
 - **Parallel Detection**: Identifies independent tasks that can run concurrently
 - **Re-queuing**: Tasks re-queued if dependencies not yet satisfied
 
+### Retry Logic with Exponential Backoff
+
+Failed tasks are automatically retried with exponential backoff:
+
+```python
+from jobqueue.core.task import Task
+
+# Task with retry configuration
+task = Task(
+    name="unstable_api_call",
+    args=["https://api.example.com"],
+    max_retries=3  # Will retry up to 3 times
+)
+
+# Automatic retry with exponential backoff
+# Retry 0: 1 second   (2^0)
+# Retry 1: 2 seconds  (2^1)
+# Retry 2: 4 seconds  (2^2)
+# Retry 3: 8 seconds  (2^3)
+```
+
+#### Backoff Configuration
+
+Customize backoff behavior:
+
+```python
+from jobqueue.core.retry_backoff import ExponentialBackoff
+
+# Custom backoff settings
+backoff = ExponentialBackoff(
+    base=2.0,        # Base for exponential calculation
+    max_delay=300.0, # Maximum delay cap (5 minutes)
+    jitter=True      # Add randomness to prevent thundering herd
+)
+
+# Calculate delay for retry attempt
+delay = backoff.calculate_delay(retry_count=2)  # Returns ~4 seconds
+```
+
+#### Retry History
+
+Track all retry attempts:
+
+```python
+# After task execution, view retry history
+for attempt in task.retry_history:
+    print(f"Attempt {attempt['attempt']}: {attempt['error']}")
+    print(f"Backoff: {attempt['backoff_seconds']}s")
+    print(f"Timestamp: {attempt['timestamp']}")
+```
+
+#### Backoff Strategies
+
+Multiple backoff strategies available:
+
+```python
+from jobqueue.core.retry_backoff import get_retry_delays
+
+# Exponential (default): 1s, 2s, 4s, 8s, 16s
+exp_delays = get_retry_delays(5, strategy="exponential", base=2.0)
+
+# Linear: 5s, 5s, 5s, 5s, 5s
+linear_delays = get_retry_delays(5, strategy="linear", delay=5.0)
+
+# Fibonacci: 1s, 1s, 2s, 3s, 5s
+fib_delays = get_retry_delays(5, strategy="fibonacci", base=1.0)
+```
+
+#### Retry Features
+
+- **Exponential Backoff**: Delays increase exponentially (1s, 2s, 4s, 8s, 16s)
+- **Maximum Cap**: Delays capped at 300 seconds by default
+- **Jitter**: Random variance prevents thundering herd
+- **Retry History**: Complete log of all retry attempts
+- **Scheduled Retries**: Uses scheduler for delayed execution
+- **Dead Letter Queue**: Failed tasks after max retries moved to DLQ
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
