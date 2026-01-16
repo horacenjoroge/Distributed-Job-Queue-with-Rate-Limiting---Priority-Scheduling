@@ -817,6 +817,124 @@ curl http://localhost:8000/workers/monitor/stats
 - **Worker Dashboard**: Real-time view of all workers and their status
 - **Metadata Storage**: Hostname, PID, queue, and start time tracked
 
+### Task Result Backend
+
+The system stores task results in Redis with TTL support. Results include status, return value, error messages, and execution duration:
+
+```python
+from jobqueue.backend.result_backend import result_backend, TaskResult
+
+# Store result (automatically done by workers)
+result_backend.store_result(task)
+
+# Fetch result by task_id
+result = result_backend.get_result(task_id)
+
+if result:
+    print(f"Status: {result.status.value}")
+    print(f"Result: {result.result}")
+    print(f"Duration: {result.duration}s")
+```
+
+**TaskResult Class:**
+
+```python
+class TaskResult:
+    task_id: str
+    status: TaskStatus
+    result: Any  # Return value (if successful)
+    error: str  # Error message (if failed)
+    started_at: datetime
+    completed_at: datetime
+    duration: float  # Execution time in seconds
+```
+
+**Result Storage:**
+
+- **Key Format**: `result:{task_id}`
+- **Default TTL**: 24 hours (86400 seconds)
+- **Custom TTL**: Can be specified per result
+- **Automatic Expiration**: Results expire after TTL
+
+**Result Backend API:**
+
+```python
+# Store result
+result_backend.store_result(task, ttl=3600)  # 1 hour TTL
+
+# Get result
+result = result_backend.get_result(task_id)
+
+# Check if result exists
+exists = result_backend.result_exists(task_id)
+
+# Get remaining TTL
+ttl = result_backend.get_result_ttl(task_id)
+
+# Extend TTL
+result_backend.extend_result_ttl(task_id, 7200)  # Extend to 2 hours
+
+# Delete result
+result_backend.delete_result(task_id)
+```
+
+**Create Result from Task:**
+
+```python
+# Automatically create TaskResult from completed Task
+result = TaskResult.from_task(task)
+
+# Result includes all execution details
+print(f"Task ID: {result.task_id}")
+print(f"Status: {result.status.value}")
+print(f"Result: {result.result}")
+print(f"Duration: {result.duration}s")
+```
+
+**REST API Endpoints:**
+
+```bash
+# Get task result
+GET /tasks/{task_id}/result
+
+# Delete task result
+DELETE /tasks/{task_id}/result
+
+# Get result TTL
+GET /tasks/{task_id}/result/ttl
+
+# Extend result TTL
+PUT /tasks/{task_id}/result/ttl?ttl_seconds=7200
+```
+
+**Test Case: Execute Task, Fetch Result**
+
+```python
+# 1. Execute task
+task = Task(name="my_task", args=[1, 2, 3])
+task.mark_success("Task completed")
+
+# 2. Store result
+result_backend.store_result(task)
+
+# 3. Fetch result
+result = result_backend.get_result(task.id)
+
+assert result is not None
+assert result.status == TaskStatus.SUCCESS
+assert result.result == "Task completed"
+```
+
+**Result Features:**
+
+- **Automatic Storage**: Workers automatically store results
+- **TTL Support**: Results expire after configurable time (default 24h)
+- **Complex Data**: Supports any serializable Python objects
+- **Error Tracking**: Failed tasks store error messages
+- **Duration Tracking**: Execution time automatically calculated
+- **API Access**: REST endpoints for result retrieval
+- **TTL Management**: Extend or check remaining TTL
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
