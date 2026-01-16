@@ -15,6 +15,7 @@ from jobqueue.core.async_support import execute_task_sync_or_async
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager
 from jobqueue.core.task_recovery import task_recovery
+from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -220,8 +221,8 @@ class PriorityWorker(Worker):
             # Mark success
             task.mark_success(result)
             
-            # Store result in Redis
-            self._store_result(task)
+            # Store result in Redis using result backend
+            result_backend.store_result(task)
             
             log.info(
                 f"Task {task.id} completed successfully",
@@ -254,17 +255,8 @@ class PriorityWorker(Worker):
             task_recovery.remove_active_task(self.worker_id, task)
     
     def _store_result(self, task: Task):
-        """Store task result in Redis with TTL."""
-        try:
-            result_key = task.get_result_key()
-            task_json = task.to_json()
-            
-            redis_broker.set_with_ttl(result_key, task_json, settings.result_ttl)
-            
-            log.debug(f"Stored result for task {task.id}")
-            
-        except Exception as e:
-            log.error(f"Failed to store result for task {task.id}: {e}")
+        """Store task result in Redis with TTL (legacy method, uses result_backend)."""
+        result_backend.store_result(task)
     
     def _handle_task_failure(self, task: Task):
         """Handle task failure - retry or move to DLQ."""
@@ -309,18 +301,29 @@ class PriorityWorker(Worker):
             log.error(f"Failed to move task {task.id} to DLQ: {e}")
     
     def get_result(self, task_id: str) -> Optional[Task]:
-        """Retrieve task result from Redis."""
-        try:
-            result_key = f"result:{task_id}"
-            task_json = redis_broker.get(result_key)
-            
-            if task_json:
-                return Task.from_json(task_json)
-            
+        """Retrieve task result from Redis (legacy method, returns Task)."""
+        from jobqueue.backend.result_backend import TaskResult
+        
+        # Use result backend
+        result = result_backend.get_result(task_id)
+        
+        if result is None:
             return None
-            
+        
+        # Convert TaskResult to Task for backward compatibility
+        try:
+            task = Task(
+                id=result.task_id,
+                name="",  # Not stored in result
+                status=result.status,
+                result=result.result,
+                error=result.error,
+                started_at=result.started_at,
+                completed_at=result.completed_at
+            )
+            return task
         except Exception as e:
-            log.error(f"Failed to retrieve result for task {task_id}: {e}")
+            log.error(f"Failed to convert result to task: {e}")
             return None
     
     def get_stats(self) -> dict:

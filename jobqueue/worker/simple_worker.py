@@ -21,6 +21,7 @@ from jobqueue.core.dead_letter_queue import dead_letter_queue, add_to_dlq
 from jobqueue.core.task_timeout import TimeoutManager, ProcessTimeoutKiller
 from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.core.task_recovery import task_recovery
+from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
 
@@ -327,8 +328,8 @@ class SimpleWorker(Worker):
             # Update status in dependency graph
             task_dependency_graph.set_task_status(task.id, TaskStatus.SUCCESS)
             
-            # Store result in Redis with TTL
-            self._store_result(task)
+            # Store result in Redis with TTL using result backend
+            result_backend.store_result(task)
             
             log.info(
                 f"Task {task.id} completed successfully",
@@ -417,33 +418,12 @@ class SimpleWorker(Worker):
     
     def _store_result(self, task: Task):
         """
-        Store task result in Redis with TTL.
+        Store task result in Redis with TTL (legacy method, uses result_backend).
         
         Args:
             task: Completed task with result
         """
-        try:
-            result_key = task.get_result_key()
-            task_json = task.to_json()
-            
-            # Store with configured TTL
-            redis_broker.set_with_ttl(
-                result_key,
-                task_json,
-                settings.result_ttl
-            )
-            
-            log.debug(
-                f"Stored result for task {task.id}",
-                extra={
-                    "task_id": task.id,
-                    "result_key": result_key,
-                    "ttl": settings.result_ttl
-                }
-            )
-            
-        except Exception as e:
-            log.error(f"Failed to store result for task {task.id}: {e}")
+        result_backend.store_result(task)
     
     def _handle_task_failure(self, task: Task, exception: Optional[Exception] = None):
         """
@@ -548,7 +528,7 @@ class SimpleWorker(Worker):
     
     def get_result(self, task_id: str) -> Optional[Task]:
         """
-        Retrieve task result from Redis.
+        Retrieve task result from Redis (legacy method, returns Task).
         
         Args:
             task_id: Task ID
@@ -556,17 +536,30 @@ class SimpleWorker(Worker):
         Returns:
             Task object with result, or None if not found
         """
-        try:
-            result_key = f"result:{task_id}"
-            task_json = redis_broker.get(result_key)
-            
-            if task_json:
-                return Task.from_json(task_json)
-            
+        from jobqueue.backend.result_backend import TaskResult
+        
+        # Use result backend
+        result = result_backend.get_result(task_id)
+        
+        if result is None:
             return None
-            
+        
+        # Convert TaskResult to Task for backward compatibility
+        # This is a simplified conversion - full Task reconstruction would require DB lookup
+        try:
+            task = Task(
+                id=result.task_id,
+                name="",  # Not stored in result
+                status=result.status,
+                result=result.result,
+                error=result.error,
+                started_at=result.started_at,
+                completed_at=result.completed_at
+            )
+            return task
         except Exception as e:
-            log.error(f"Failed to retrieve result for task {task_id}: {e}")
+            log.error(f"Failed to convert result to task: {e}")
+            return None
             return None
     
     def _check_dependencies(self, task: Task) -> bool:
