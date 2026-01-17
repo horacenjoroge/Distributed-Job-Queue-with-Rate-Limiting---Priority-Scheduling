@@ -23,6 +23,7 @@ from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.core.task_recovery import task_recovery
 from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
+from jobqueue.core.distributed_lock import task_lock_manager
 from jobqueue.core.metrics import metrics_collector
 from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
@@ -238,6 +239,39 @@ class SimpleWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
+        # Generate task signature if not set (for distributed locking)
+        if not task.task_signature:
+            task.compute_and_set_signature()
+        
+        # Acquire distributed lock to prevent concurrent execution
+        task_lock = None
+        if task.task_signature:
+            # Use task timeout as lock TTL, with minimum of 60 seconds
+            lock_ttl = max(task.timeout, 60) if task.timeout > 0 else 300
+            lock_timeout = 10  # Wait up to 10 seconds for lock
+            
+            task_lock = task_lock_manager.acquire_task_lock(
+                task_signature=task.task_signature,
+                ttl=lock_ttl,
+                timeout=lock_timeout,
+                retry_interval=0.5  # Retry every 0.5 seconds
+            )
+            
+            if not task_lock:
+                # Lock acquisition failed - task is already running
+                log.warning(
+                    f"Failed to acquire lock for task, task may be running concurrently",
+                    extra={
+                        "task_id": task.id,
+                        "task_signature": task.task_signature[:16],
+                        "worker_id": self.worker_id
+                    }
+                )
+                # Mark task as failed due to lock acquisition failure
+                task.mark_failed("Lock acquisition failed - task may be running concurrently")
+                task_recovery.remove_active_task(self.worker_id, task)
+                return
+        
         # Add to active tasks set (for recovery)
         task_recovery.add_active_task(self.worker_id, task)
         
@@ -336,6 +370,10 @@ class SimpleWorker(Worker):
                 
                 # Remove from active tasks
                 task_recovery.remove_active_task(self.worker_id, task)
+                
+                # Release distributed lock
+                if task_lock:
+                    task_lock.release()
                 return
             
             # Check if task timed out
@@ -482,6 +520,10 @@ class SimpleWorker(Worker):
             
             # Remove from active tasks set
             task_recovery.remove_active_task(self.worker_id, task)
+            
+            # Release distributed lock
+            if task_lock:
+                task_lock.release()
             
             # Remove task from running tasks (legacy)
             self._remove_running_task(task)
