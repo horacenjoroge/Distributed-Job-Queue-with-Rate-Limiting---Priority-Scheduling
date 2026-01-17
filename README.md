@@ -1490,6 +1490,127 @@ assert len(set(processed)) == 1000  # No duplicates
 4. Other workers continue waiting
 5. No task is ever returned to multiple workers
 
+### Worker Autoscaling
+
+The system supports automatic scaling of workers based on queue size:
+
+```python
+from jobqueue.core.worker_pool import WorkerPool
+from jobqueue.core.worker_autoscaling import create_autoscaler
+from jobqueue.worker.simple_worker import SimpleWorker
+
+# Create worker pool
+pool = WorkerPool(
+    pool_name="my_pool",
+    worker_class=SimpleWorker,
+    queue_name="default",
+    initial_workers=1
+)
+pool.start()
+
+# Enable autoscaling
+autoscaler = create_autoscaler(
+    pool=pool,
+    scale_up_threshold=100,    # Scale up when queue > 100
+    scale_down_threshold=10,   # Scale down when queue < 10
+    min_workers=1,             # Minimum workers
+    max_workers=50,            # Maximum workers
+    check_interval=30,         # Check every 30 seconds
+    cooldown_seconds=60        # Cooldown between scaling actions
+)
+
+autoscaler.start()
+```
+
+**Autoscaling Features:**
+
+- **Queue Size Monitoring**: Monitors queue size periodically
+- **Scale Up**: When queue size > threshold, add workers
+- **Scale Down**: When queue size < threshold, remove idle workers
+- **Min/Max Limits**: Enforce minimum and maximum worker counts
+- **Cooldown Period**: Prevent rapid scaling (configurable)
+- **Health Checks**: Verify system health before scaling
+- **Scaling History**: Track all scaling actions
+
+**Autoscaling Logic:**
+
+```python
+# Scale up when queue size > threshold
+if queue_size > scale_up_threshold and workers < max_workers:
+    add_workers()
+
+# Scale down when queue size < threshold
+if queue_size < scale_down_threshold and workers > min_workers:
+    remove_idle_workers()
+```
+
+**Configuration:**
+
+- **scale_up_threshold**: Queue size to trigger scale up (default: 100)
+- **scale_down_threshold**: Queue size to trigger scale down (default: 10)
+- **min_workers**: Minimum number of workers (default: 1)
+- **max_workers**: Maximum number of workers (default: 50)
+- **check_interval**: How often to check queue size in seconds (default: 30)
+- **cooldown_seconds**: Cooldown period between scaling actions (default: 60)
+
+**REST API Endpoints:**
+
+```bash
+# Enable autoscaling
+POST /worker-pools/{pool_name}/autoscale?scale_up_threshold=100&scale_down_threshold=10&min_workers=1&max_workers=50
+
+# Get autoscaler status
+GET /worker-pools/{pool_name}/autoscale
+
+# Disable autoscaling
+DELETE /worker-pools/{pool_name}/autoscale
+```
+
+**Test Case: Queue Grows, Verify Workers Scale Up**
+
+```python
+# 1. Start with 1 worker
+pool = WorkerPool(initial_workers=1)
+pool.start()
+
+# 2. Enqueue tasks to grow queue > 100
+queue = Queue("default")
+for i in range(150):
+    task = Task(name="task", args=[i])
+    queue.enqueue(task)
+
+# 3. Enable autoscaling
+autoscaler = create_autoscaler(
+    pool=pool,
+    scale_up_threshold=100,
+    check_interval=2
+)
+autoscaler.start()
+
+# 4. Wait for scaling
+time.sleep(5)
+
+# 5. Verify workers scaled up
+status = autoscaler.get_status()
+assert status['current_workers'] > 1  # Workers increased
+```
+
+**Autoscaling Behavior:**
+
+- **Scale Up**: Adds workers when queue size exceeds threshold
+- **Scale Down**: Removes idle workers when queue size is below threshold
+- **Cooldown**: Prevents rapid scaling (waits for cooldown period)
+- **Health Check**: Verifies Redis connection and pool status before scaling
+- **Min/Max Limits**: Respects minimum and maximum worker limits
+- **History Tracking**: Records all scaling actions with timestamps
+
+**Deep End: Autoscaling Challenges**
+
+- **Rapid Queue Growth**: Cooldown period prevents excessive scaling
+- **Queue Size Fluctuations**: Cooldown prevents thrashing
+- **Worker Startup Time**: Consider worker startup time in scaling decisions
+- **Resource Constraints**: Max workers limit prevents resource exhaustion
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
