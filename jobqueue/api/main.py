@@ -1423,6 +1423,34 @@ async def get_worker_type_queues(worker_type: WorkerType):
         )
 
 
+@app.get("/locks/{task_signature}", tags=["Locks"])
+async def get_lock_status(task_signature: str):
+    """
+    Get lock status for a task signature.
+    
+    Args:
+        task_signature: Task signature (hash)
+        
+    Returns:
+        Lock status information
+    """
+    try:
+        is_locked = task_lock_manager.is_task_locked(task_signature)
+        ttl = task_lock_manager.get_task_lock_ttl(task_signature)
+        
+        return {
+            "task_signature": task_signature,
+            "is_locked": is_locked,
+            "remaining_ttl": ttl
+        }
+    except Exception as e:
+        log.error(f"Error getting lock status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 def main():
     """Main entry point for the API server."""
     log.info(
