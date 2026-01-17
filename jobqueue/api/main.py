@@ -43,6 +43,7 @@ class TaskSubmitRequest(BaseModel):
     depends_on: Optional[List[str]] = None
     queue_name: str = "default"
     unique: bool = False  # Enable deduplication
+    worker_type: Optional[WorkerType] = WorkerType.DEFAULT  # Worker type requirement (cpu, io, gpu)
 
 
 class TaskResponse(BaseModel):
