@@ -83,6 +83,9 @@ class Task(BaseModel):
     # Deduplication
     unique: bool = False  # If True, prevent duplicate execution
     
+    # Worker routing
+    worker_type: Optional[WorkerType] = WorkerType.DEFAULT  # Required worker type (cpu, io, gpu)
+    
     class Config:
         use_enum_values = True
     
