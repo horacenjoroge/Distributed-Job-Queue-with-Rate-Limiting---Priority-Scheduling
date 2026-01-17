@@ -1,7 +1,7 @@
 """
 FastAPI application entry point.
 """
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
@@ -32,6 +32,7 @@ from jobqueue.core.worker_autoscaling import (
 )
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
+from jobqueue.api.websocket_manager import websocket_manager
 from config import settings
 
 
