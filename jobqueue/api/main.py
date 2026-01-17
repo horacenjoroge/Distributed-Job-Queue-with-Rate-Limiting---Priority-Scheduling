@@ -1268,6 +1268,115 @@ async def delete_worker_pool(pool_name: str, graceful: bool = True):
         )
 
 
+@app.post("/worker-pools/{pool_name}/autoscale", tags=["Worker Pools"])
+async def enable_autoscaling(
+    pool_name: str,
+    scale_up_threshold: int = 100,
+    scale_down_threshold: int = 10,
+    min_workers: int = 1,
+    max_workers: int = 50,
+    check_interval: int = 30,
+    cooldown_seconds: int = 60
+):
+    """Enable autoscaling for a worker pool."""
+    try:
+        pool = distributed_worker_manager.get_pool(pool_name)
+        
+        if not pool:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker pool {pool_name} not found"
+            )
+        
+        existing = get_autoscaler(pool_name)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Autoscaler already exists for pool {pool_name}"
+            )
+        
+        autoscaler = create_autoscaler(
+            pool=pool,
+            scale_up_threshold=scale_up_threshold,
+            scale_down_threshold=scale_down_threshold,
+            min_workers=min_workers,
+            max_workers=max_workers,
+            check_interval=check_interval,
+            cooldown_seconds=cooldown_seconds
+        )
+        
+        autoscaler.start()
+        
+        return {
+            "message": f"Autoscaling enabled for pool {pool_name}",
+            "pool_name": pool_name,
+            "status": autoscaler.get_status()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error enabling autoscaling: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/worker-pools/{pool_name}/autoscale", tags=["Worker Pools"])
+async def get_autoscaler_status(pool_name: str):
+    """Get autoscaler status for a worker pool."""
+    try:
+        autoscaler = get_autoscaler(pool_name)
+        
+        if not autoscaler:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Autoscaler not found for pool {pool_name}"
+            )
+        
+        status = autoscaler.get_status()
+        history = autoscaler.get_scaling_history(limit=20)
+        
+        return {
+            **status,
+            "recent_history": history
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting autoscaler status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/worker-pools/{pool_name}/autoscale", tags=["Worker Pools"])
+async def disable_autoscaling(pool_name: str):
+    """Disable autoscaling for a worker pool."""
+    try:
+        success = remove_autoscaler(pool_name)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Autoscaler not found for pool {pool_name}"
+            )
+        
+        return {
+            "message": f"Autoscaling disabled for pool {pool_name}",
+            "pool_name": pool_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error disabling autoscaling: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 def main():
     """Main entry point for the API server."""
     log.info(
