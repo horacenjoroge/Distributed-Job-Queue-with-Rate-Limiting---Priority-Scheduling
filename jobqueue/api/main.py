@@ -4,7 +4,7 @@ FastAPI application entry point.
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from jobqueue.core.queue import JobQueue
