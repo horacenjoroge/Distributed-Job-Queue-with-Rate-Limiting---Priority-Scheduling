@@ -8,8 +8,12 @@ from pydantic import BaseModel
 import uvicorn
 
 from jobqueue.core.queue import JobQueue
-from jobqueue.core.task import Task, TaskPriority, TaskStatus
+from jobqueue.core.task import Task, TaskPriority, TaskStatus, WorkerType
+from jobqueue.core.task_routing import task_router
+from jobqueue.core.distributed_lock import task_lock_manager
 from jobqueue.broker.redis_broker import redis_broker
+from jobqueue.api.auth import require_api_key, api_key_auth
+from jobqueue.api.rate_limit_middleware import APIRateLimitMiddleware
 from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.core.distributed_rate_limiter import distributed_rate_limiter
 from jobqueue.core.queue_config import queue_config_manager, QueueRateLimitConfig
@@ -103,6 +107,9 @@ app = FastAPI(
     title="Job Queue API",
     description="Distributed Job Queue with Rate Limiting & Priority Scheduling",
     version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # Add CORS middleware
@@ -112,6 +119,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Add API rate limiting middleware
+app.add_middleware(
+    APIRateLimitMiddleware,
+    requests_per_minute=60,
+    requests_per_hour=1000
 )
 
 
@@ -174,7 +188,7 @@ async def health_check():
 
 
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"])
-async def submit_task(request: TaskSubmitRequest):
+async def submit_task(request: TaskSubmitRequest, api_key: str = Security(require_api_key)):
     """
     Submit a new task to the queue.
     
@@ -262,11 +276,27 @@ async def get_task(task_id: str):
         )
 
 
+@app.delete("/tasks/{task_id}", tags=["Tasks"])
+async def delete_task(task_id: str, api_key: str = Security(require_api_key)):
+    """
+    Delete a task (alias for cancel).
+    
+    Args:
+        task_id: Task ID to delete
+        api_key: API key for authentication
+        
+    Returns:
+        Deletion result
+    """
+    return await cancel_task(task_id, reason="user_requested", force=False, api_key=api_key)
+
+
 @app.post("/tasks/{task_id}/cancel", tags=["Tasks"])
 async def cancel_task(
     task_id: str,
     reason: Optional[str] = None,
-    force: bool = False
+    force: bool = False,
+    api_key: str = Security(require_api_key)
 ):
     """
     Cancel a pending or running task.
@@ -506,6 +536,56 @@ async def list_queues():
         return {"queues": queues}
     except Exception as e:
         log.error(f"Error listing queues: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/queues/{queue_name}", tags=["Queues"])
+async def purge_queue(queue_name: str, api_key: str = Security(require_api_key)):
+    """
+    Purge a queue (remove all tasks).
+    
+    Args:
+        queue_name: Queue name to purge
+        api_key: API key for authentication
+        
+    Returns:
+        Purge result
+    """
+    try:
+        from jobqueue.core.redis_queue import Queue
+        from jobqueue.core.priority_queue import PriorityQueue
+        
+        # Try FIFO queue first
+        try:
+            queue = Queue(queue_name)
+            purged = queue.purge()
+            return {
+                "message": f"Queue {queue_name} purged",
+                "queue_name": queue_name,
+                "tasks_removed": purged
+            }
+        except Exception:
+            # Try priority queue
+            try:
+                queue = PriorityQueue(queue_name)
+                purged = queue.purge()
+                return {
+                    "message": f"Priority queue {queue_name} purged",
+                    "queue_name": queue_name,
+                    "tasks_removed": purged
+                }
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Queue {queue_name} not found"
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error purging queue: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
