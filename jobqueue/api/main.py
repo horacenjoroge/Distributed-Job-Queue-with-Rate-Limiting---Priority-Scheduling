@@ -154,6 +154,28 @@ async def startup_event():
         raise
 
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time updates."""
+    await websocket_manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive and handle incoming messages
+            data = await websocket.receive_text()
+            # Echo back or handle client messages if needed
+            try:
+                message = json.loads(data)
+                if message.get("type") == "ping":
+                    await websocket_manager.send_personal_message({"type": "pong"}, websocket)
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+    except Exception as e:
+        log.error(f"WebSocket error: {e}")
+        websocket_manager.disconnect(websocket)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up connections on shutdown."""
