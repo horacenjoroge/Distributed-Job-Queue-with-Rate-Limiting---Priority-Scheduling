@@ -23,6 +23,7 @@ from jobqueue.core.worker_heartbeat import WorkerStatus
 from jobqueue.core.task_recovery import task_recovery
 from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
+from jobqueue.core.metrics import metrics_collector
 from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
@@ -387,6 +388,10 @@ class SimpleWorker(Worker):
             # Store result in Redis with TTL using result backend
             result_backend.store_result(task)
             
+            # Record metrics
+            duration = task.execution_time() or 0.0
+            metrics_collector.record_task_completed(task, duration, success=True)
+            
             log.info(
                 f"Task {task.id} completed successfully",
                 extra={
@@ -427,6 +432,10 @@ class SimpleWorker(Worker):
                     "error": error_msg
                 }
             )
+            
+            # Record metrics
+            duration = task.execution_time() or 0.0
+            metrics_collector.record_task_completed(task, duration, success=False)
             
             # Handle failure (retry or dead letter queue)
             # Timeouts typically shouldn't be retried, but allow it if configured

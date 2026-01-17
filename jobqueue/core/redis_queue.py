@@ -4,6 +4,7 @@ Redis-based FIFO queue implementation using LIST data structure.
 from typing import Optional
 from jobqueue.core.task import Task
 from jobqueue.core.task_deduplication import task_deduplication
+from jobqueue.core.metrics import metrics_collector
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.utils.logger import log
 
@@ -73,6 +74,9 @@ class Queue:
         # Register task for deduplication if unique
         if task.unique:
             task_deduplication.register_task(task)
+        
+        # Record metrics
+        metrics_collector.record_task_enqueued(self.name, task.priority)
         
         log.debug(
             f"Enqueued task to {self.name}",
