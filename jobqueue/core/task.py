@@ -29,6 +29,14 @@ class TaskPriority(str, Enum):
     LOW = "low"
 
 
+class WorkerType(str, Enum):
+    """Worker type enumeration for task routing."""
+    CPU = "cpu"
+    IO = "io"
+    GPU = "gpu"
+    DEFAULT = "default"  # Default worker type (no specific requirement)
+
+
 class Task(BaseModel):
     """
     Task model representing a unit of work to be executed.

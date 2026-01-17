@@ -8,6 +8,7 @@ import time
 from typing import Optional
 from datetime import datetime
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
+from jobqueue.core.task import WorkerType
 from jobqueue.utils.logger import log
 
 
@@ -16,20 +17,43 @@ class Worker:
     Basic worker class for processing tasks from the queue.
     """
     
-    def __init__(self, worker_id: Optional[str] = None, queue_name: str = "default"):
+    def __init__(
+        self,
+        worker_id: Optional[str] = None,
+        queue_name: str = "default",
+        worker_type: Optional[WorkerType] = None
+    ):
         """
         Initialize worker.
         
         Args:
             worker_id: Unique worker identifier (auto-generated if not provided)
-            queue_name: Name of the queue to process
+            queue_name: Name of the queue to process (can be overridden by worker_type)
+            worker_type: Worker type (cpu, io, gpu, default) - determines which queues to subscribe to
             
         Example:
             worker = Worker()
             worker.start()
         """
         self.worker_id = worker_id or self._generate_worker_id()
-        self.queue_name = queue_name
+        self.worker_type = worker_type or WorkerType.DEFAULT
+        
+        # If worker_type is specified, determine queues to subscribe to
+        if worker_type and worker_type != WorkerType.DEFAULT:
+            from jobqueue.core.task_routing import task_router
+            from jobqueue.core.task import TaskPriority
+            
+            # Get queues for this worker type
+            self.subscribed_queues = task_router.get_worker_queues(
+                worker_type,
+                priorities=[TaskPriority.HIGH, TaskPriority.MEDIUM, TaskPriority.LOW]
+            )
+            # Use first queue as primary queue_name for backward compatibility
+            self.queue_name = self.subscribed_queues[0] if self.subscribed_queues else queue_name
+        else:
+            self.subscribed_queues = [queue_name]
+            self.queue_name = queue_name
+        
         self.is_running = False
         
         # Worker identification
