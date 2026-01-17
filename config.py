@@ -2,7 +2,7 @@
 Configuration management for the job queue system.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
