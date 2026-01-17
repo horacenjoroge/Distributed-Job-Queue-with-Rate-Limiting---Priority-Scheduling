@@ -1382,6 +1382,47 @@ async def disable_autoscaling(pool_name: str):
         )
 
 
+@app.get("/routing/queues", tags=["Routing"])
+async def get_routing_queues(worker_type: Optional[WorkerType] = None):
+    """Get routing queues for worker types."""
+    try:
+        if worker_type:
+            queues = task_router.get_worker_queues(worker_type)
+            return {
+                "worker_type": worker_type.value,
+                "queues": queues
+            }
+        else:
+            all_queues = task_router.get_all_worker_type_queues()
+            return {
+                "worker_types": {wt.value: queues for wt, queues in all_queues.items()}
+            }
+    except Exception as e:
+        log.error(f"Error getting routing queues: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/routing/queue/{worker_type}", tags=["Routing"])
+async def get_worker_type_queues(worker_type: WorkerType):
+    """Get queues for a specific worker type."""
+    try:
+        queues = task_router.get_worker_queues(worker_type)
+        return {
+            "worker_type": worker_type.value,
+            "queues": queues,
+            "routing_key_format": "queue:{worker_type}:{priority}"
+        }
+    except Exception as e:
+        log.error(f"Error getting worker type queues: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 def main():
     """Main entry point for the API server."""
     log.info(
