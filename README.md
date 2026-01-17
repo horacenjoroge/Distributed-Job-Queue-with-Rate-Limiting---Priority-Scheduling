@@ -1182,6 +1182,158 @@ For tasks that don't check `should_cancel()` (e.g., long-running loops), conside
 - Using timeouts as fallback
 - Implementing cleanup handlers for partially completed work
 
+### Metrics Collection
+
+The system tracks performance metrics using Redis sorted sets for time-series data:
+
+```python
+from jobqueue.core.metrics import metrics_collector
+
+# Get all metrics
+metrics = metrics_collector.get_all_metrics(window_seconds=3600)
+
+print(f"Tasks enqueued/sec: {metrics['tasks_enqueued_per_second']}")
+print(f"Tasks completed/sec: {metrics['tasks_completed_per_second']}")
+print(f"Duration p50: {metrics['duration_percentiles'][0.5]}ms")
+print(f"Success rate: {metrics['success_rate']['success_rate']:.2%}")
+```
+
+**Metrics Tracked:**
+
+- **Tasks Enqueued Per Second**: Rate of task enqueuing
+- **Tasks Completed Per Second**: Rate of task completion
+- **Task Duration Percentiles**: p50 (median), p95, p99 in milliseconds
+- **Success vs Failure Rate**: Percentage of successful vs failed tasks
+- **Queue Size Per Priority**: Current queue size for each priority level
+- **Worker Utilization**: Active vs idle workers, utilization percentage
+
+**Metrics API:**
+
+```python
+# Record task enqueued
+metrics_collector.record_task_enqueued(queue_name, priority)
+
+# Record task completed
+metrics_collector.record_task_completed(task, duration, success=True)
+
+# Get tasks per second
+enqueued_rate = metrics_collector.get_tasks_enqueued_per_second(window_seconds=60)
+completed_rate = metrics_collector.get_tasks_completed_per_second(window_seconds=60)
+
+# Get duration percentiles
+percentiles = metrics_collector.get_task_duration_percentiles(
+    window_seconds=3600,
+    percentiles=[0.5, 0.95, 0.99]
+)
+
+# Get success rate
+rates = metrics_collector.get_success_rate(window_seconds=3600)
+print(f"Success: {rates['success_rate']:.2%}")
+print(f"Failure: {rates['failure_rate']:.2%}")
+
+# Get worker utilization
+utilization = metrics_collector.get_worker_utilization()
+print(f"Utilization: {utilization['utilization_percent']:.2f}%")
+
+# Aggregate metrics
+hourly = metrics_collector.aggregate_metrics("hourly")
+daily = metrics_collector.aggregate_metrics("daily")
+```
+
+**Time-Series Storage:**
+
+Metrics are stored in Redis using sorted sets (ZADD) for efficient time-range queries:
+
+- **Key Format**: `metrics:{metric_name}`
+- **Score**: Timestamp (for time-series queries)
+- **Member**: Metric value or identifier
+- **TTL**: 7 days for raw metrics, 30 days for aggregated
+
+**REST API Endpoints:**
+
+```bash
+# Get all metrics
+GET /metrics?window_seconds=3600
+
+# Response
+{
+  "timestamp": 1234567890.0,
+  "window_seconds": 3600,
+  "tasks": {
+    "enqueued_per_second": 10.5,
+    "completed_per_second": 9.8
+  },
+  "duration_percentiles": {
+    "p50_ms": 150.0,
+    "p95_ms": 500.0,
+    "p99_ms": 1000.0
+  },
+  "success_rate": {
+    "success_rate": 0.95,
+    "failure_rate": 0.05,
+    "total": 1000,
+    "success_count": 950,
+    "failure_count": 50
+  },
+  "queue_size_per_priority": {
+    "high": 10,
+    "medium": 50,
+    "low": 20
+  },
+  "worker_utilization": {
+    "total_workers": 5,
+    "active_workers": 3,
+    "idle_workers": 2,
+    "dead_workers": 0,
+    "utilization_percent": 60.0
+  }
+}
+
+# Get aggregated metrics
+GET /metrics/aggregate?aggregation=hourly
+GET /metrics/aggregate?aggregation=daily
+```
+
+**Test Case: Generate Metrics, Verify Accuracy**
+
+```python
+# 1. Enqueue tasks
+for i in range(20):
+    queue.enqueue(Task(name="task", args=[i]))
+
+# 2. Complete tasks
+for i in range(15):
+    task = Task(name="task", args=[i])
+    metrics_collector.record_task_completed(task, 0.1, success=True)
+
+# 3. Generate metrics
+metrics = metrics_collector.get_all_metrics(window_seconds=60)
+
+# 4. Verify accuracy
+assert metrics['tasks_enqueued_per_second'] > 0
+assert metrics['tasks_completed_per_second'] > 0
+assert 0.5 in metrics['duration_percentiles']  # p50 exists
+assert metrics['success_rate']['total'] == 15
+```
+
+**Metrics Features:**
+
+- **Automatic Collection**: Metrics recorded automatically on enqueue/completion
+- **Time-Series Storage**: Redis sorted sets for efficient queries
+- **Percentile Calculation**: p50, p95, p99 for task durations
+- **Aggregation**: Hourly and daily aggregations
+- **Per-Queue Metrics**: Track metrics per queue and priority
+- **Per-Task Metrics**: Track duration per task name
+- **Worker Metrics**: Real-time worker utilization
+- **TTL Management**: Automatic cleanup of old metrics
+
+**Percentile Calculation:**
+
+Percentiles are calculated from sorted duration values:
+- **p50 (median)**: 50% of tasks complete within this duration
+- **p95**: 95% of tasks complete within this duration
+- **p99**: 99% of tasks complete within this duration
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
