@@ -1334,6 +1334,162 @@ Percentiles are calculated from sorted duration values:
 - **p95**: 95% of tasks complete within this duration
 - **p99**: 99% of tasks complete within this duration
 
+### Multiple Workers
+
+The system supports running multiple workers safely with no duplicate task processing:
+
+```python
+from jobqueue.core.worker_pool import WorkerPool, distributed_worker_manager
+from jobqueue.worker.simple_worker import SimpleWorker
+
+# Create worker pool
+pool = WorkerPool(
+    pool_name="my_pool",
+    worker_class=SimpleWorker,
+    queue_name="default",
+    initial_workers=5
+)
+
+# Start pool
+pool.start()
+
+# Scale up/down
+pool.scale_up(3)  # Add 3 workers
+pool.scale_down(2)  # Remove 2 workers
+```
+
+**Unique Worker IDs:**
+
+Each worker has a unique ID based on hostname + PID:
+- **Format**: `worker-{hostname}-{pid}`
+- **Uniqueness**: Guaranteed across different machines and processes
+- **Tracking**: Workers tracked in Redis for health monitoring
+
+**Atomic Task Dequeue:**
+
+Workers compete for tasks using Redis BRPOP, which is atomic:
+- **BRPOP**: Blocking right pop - only one worker gets each task
+- **Atomic Operation**: Redis ensures no task is processed twice
+- **Race Condition Safe**: Multiple workers can safely call BRPOP simultaneously
+
+**Worker Pool Management:**
+
+```python
+# Create pool
+pool = distributed_worker_manager.create_pool(
+    pool_name="production_pool",
+    worker_class=SimpleWorker,
+    queue_name="default",
+    initial_workers=10
+)
+
+pool.start()
+
+# Get pool status
+status = pool.get_pool_status()
+print(f"Total workers: {status['total_workers']}")
+print(f"Alive workers: {status['alive_workers']}")
+
+# Scale workers
+pool.scale_up(5)  # Add 5 workers
+pool.scale_down(3)  # Remove 3 workers
+
+# Restart worker
+pool.restart_worker(worker_id)
+
+# Stop pool
+pool.stop(graceful=True)
+```
+
+**Worker Scaling:**
+
+```python
+# Scale up (add workers)
+new_workers = pool.scale_up(count=5)
+print(f"Added {len(new_workers)} workers")
+
+# Scale down (remove workers)
+removed_workers = pool.scale_down(count=3)
+print(f"Removed {len(removed_workers)} workers")
+```
+
+**REST API Endpoints:**
+
+```bash
+# Create worker pool
+POST /worker-pools?pool_name=my_pool&queue_name=default&initial_workers=5
+
+# List all pools
+GET /worker-pools
+
+# Get pool status
+GET /worker-pools/{pool_name}
+
+# Scale up
+POST /worker-pools/{pool_name}/scale-up?count=3
+
+# Scale down
+POST /worker-pools/{pool_name}/scale-down?count=2
+
+# Delete pool
+DELETE /worker-pools/{pool_name}?graceful=true
+```
+
+**Test Case: 10 Workers, 1000 Tasks, Verify No Duplicates**
+
+```python
+# 1. Enqueue 1000 tasks
+queue = Queue("test_queue")
+for i in range(1000):
+    task = Task(name="task", args=[i])
+    queue.enqueue(task)
+
+# 2. Start 10 workers
+pool = WorkerPool(initial_workers=10)
+pool.start()
+
+# 3. Workers process tasks using BRPOP (atomic)
+# Each worker calls queue.dequeue() which uses BRPOP
+# Redis ensures only one worker gets each task
+
+# 4. Verify no duplicates
+processed = []  # Track processed task IDs
+# ... workers process tasks ...
+
+assert len(processed) == 1000  # All tasks processed
+assert len(set(processed)) == 1000  # No duplicates
+```
+
+**Multiple Workers Features:**
+
+- **Unique Worker IDs**: Hostname + PID ensures uniqueness
+- **Atomic Dequeue**: BRPOP prevents duplicate processing
+- **Worker Pool Management**: Create, scale, and manage worker pools
+- **Scaling**: Scale workers up/down dynamically
+- **Graceful Shutdown**: Workers shutdown gracefully with SIGTERM
+- **Process Management**: Multiprocessing for true parallelism
+- **Status Tracking**: Real-time worker pool status
+- **Distributed Support**: Run workers across multiple machines
+
+**Deep End: Race Conditions and Network Partitions**
+
+- **Two Workers Pop Same Task**: Cannot happen - BRPOP is atomic at Redis level
+- **Network Partition**: If worker loses connection to Redis:
+  - Task remains in queue (not removed)
+  - Worker cannot complete task
+  - Task recovery system will detect orphaned task
+  - Task will be re-queued for another worker
+
+**How BRPOP Ensures Atomicity:**
+
+1. Multiple workers call `BRPOP queue:default 5`
+2. Redis queues the requests
+3. When a task is available, Redis atomically:
+   - Removes task from queue
+   - Returns it to ONE worker
+4. Other workers continue waiting
+5. No task is ever returned to multiple workers
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
