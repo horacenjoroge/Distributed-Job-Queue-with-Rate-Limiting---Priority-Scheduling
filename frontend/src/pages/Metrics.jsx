@@ -74,8 +74,8 @@ const Metrics = () => {
       {
         label: 'Rate',
         data: [
-          metrics.tasks_enqueued_per_second || 0,
-          metrics.tasks_completed_per_second || 0
+          metrics.tasks?.enqueued_per_second || 0,
+          metrics.tasks?.completed_per_second || 0
         ],
         backgroundColor: ['rgba(59, 130, 246, 0.5)', 'rgba(34, 197, 94, 0.5)'],
         borderColor: ['rgba(59, 130, 246, 1)', 'rgba(34, 197, 94, 1)'],
@@ -89,11 +89,11 @@ const Metrics = () => {
     labels: ['P50', 'P95', 'P99'],
     datasets: [
       {
-        label: 'Duration (seconds)',
+        label: 'Duration (ms)',
         data: [
-          metrics.task_duration_p50 || 0,
-          metrics.task_duration_p95 || 0,
-          metrics.task_duration_p99 || 0
+          (metrics.duration_percentiles?.p50_ms || 0) / 1000,
+          (metrics.duration_percentiles?.p95_ms || 0) / 1000,
+          (metrics.duration_percentiles?.p99_ms || 0) / 1000
         ],
         backgroundColor: 'rgba(147, 51, 234, 0.5)',
         borderColor: 'rgba(147, 51, 234, 1)',
@@ -103,13 +103,15 @@ const Metrics = () => {
   }
 
   // Success/Failure Rate Chart Data
+  const successRate = metrics.success_rate?.success_rate || 0
+  const failureRate = metrics.success_rate?.failure_rate || 0
   const successRateData = {
     labels: ['Success', 'Failure'],
     datasets: [
       {
         data: [
-          (metrics.success_rate || 0) * 100,
-          (1 - (metrics.success_rate || 0)) * 100
+          successRate * 100,
+          failureRate * 100
         ],
         backgroundColor: ['rgba(34, 197, 94, 0.5)', 'rgba(239, 68, 68, 0.5)'],
         borderColor: ['rgba(34, 197, 94, 1)', 'rgba(239, 68, 68, 1)'],
@@ -120,11 +122,11 @@ const Metrics = () => {
 
   // Queue Sizes Chart Data
   const queueSizesData = {
-    labels: Object.keys(metrics.queue_sizes || {}),
+    labels: Object.keys(metrics.queue_size_per_priority || {}),
     datasets: [
       {
         label: 'Queue Size',
-        data: Object.values(metrics.queue_sizes || {}),
+        data: Object.values(metrics.queue_size_per_priority || {}),
         backgroundColor: 'rgba(59, 130, 246, 0.5)',
         borderColor: 'rgba(59, 130, 246, 1)',
         borderWidth: 2
@@ -164,19 +166,19 @@ const Metrics = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="text-2xl font-bold text-gray-900">
-            {metrics.tasks_enqueued_per_second?.toFixed(2) || '0.00'}
+            {(metrics.tasks?.enqueued_per_second || 0).toFixed(2)}
           </div>
           <div className="text-sm text-gray-500">Tasks Enqueued/sec</div>
         </div>
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="text-2xl font-bold text-gray-900">
-            {metrics.tasks_completed_per_second?.toFixed(2) || '0.00'}
+            {(metrics.tasks?.completed_per_second || 0).toFixed(2)}
           </div>
           <div className="text-sm text-gray-500">Tasks Completed/sec</div>
         </div>
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="text-2xl font-bold text-green-600">
-            {((metrics.success_rate || 0) * 100).toFixed(1)}%
+            {((metrics.success_rate?.success_rate || 0) * 100).toFixed(1)}%
           </div>
           <div className="text-sm text-gray-500">Success Rate</div>
         </div>

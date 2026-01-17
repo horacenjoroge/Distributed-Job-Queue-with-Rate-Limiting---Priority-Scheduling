@@ -109,8 +109,10 @@ const Home = () => {
       try {
         const metricsRes = await metricsService.get(3600)
         const metrics = metricsRes.data
-        if (metrics.success_rate !== undefined) {
-          successRate = (metrics.success_rate * 100).toFixed(1)
+        if (metrics.success_rate && metrics.success_rate.success_rate !== undefined) {
+          successRate = (metrics.success_rate.success_rate * 100).toFixed(1)
+        } else if (metrics.success_rate === 0 || metrics.success_rate === 0.0) {
+          successRate = '0.0'
         }
       } catch (e) {
         console.error('Error loading metrics:', e)
