@@ -2,8 +2,9 @@
 Redis-based FIFO queue implementation using LIST data structure.
 """
 from typing import Optional
-from jobqueue.core.task import Task
+from jobqueue.core.task import Task, WorkerType
 from jobqueue.core.task_deduplication import task_deduplication
+from jobqueue.core.task_routing import task_router
 from jobqueue.core.metrics import metrics_collector
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.utils.logger import log
@@ -32,13 +33,15 @@ class Queue:
         """Get the Redis key for this queue."""
         return self._queue_key
     
-    def enqueue(self, task: Task) -> str:
+    def enqueue(self, task: Task, use_routing: bool = True) -> str:
         """
         Add a task to the queue (FIFO).
         Uses LPUSH to add to the left side of the list.
+        If use_routing is True, routes task based on worker_type.
         
         Args:
             task: Task to enqueue
+            use_routing: If True, route task based on worker_type (default: True)
             
         Returns:
             Task ID (or existing task_id if duplicate found)
@@ -65,6 +68,32 @@ class Queue:
                     }
                 )
                 return existing_task_id
+        
+        # Route task if routing is enabled and worker_type is specified
+        if use_routing and task.worker_type and task.worker_type != WorkerType.DEFAULT:
+            try:
+                # Route to worker type specific queue
+                routed_queue_name = task_router.route_task(task, use_priority_queue=False)
+                log.debug(
+                    f"Task routed to worker type queue",
+                    extra={
+                        "task_id": task.id,
+                        "worker_type": task.worker_type.value,
+                        "routed_queue": routed_queue_name,
+                        "original_queue": self.name
+                    }
+                )
+                return task.id
+            except Exception as e:
+                # Fallback to current queue if routing fails
+                log.warning(
+                    f"Routing failed, using original queue",
+                    extra={
+                        "task_id": task.id,
+                        "error": str(e),
+                        "queue": self.name
+                    }
+                )
         
         task_json = task.to_json()
         
