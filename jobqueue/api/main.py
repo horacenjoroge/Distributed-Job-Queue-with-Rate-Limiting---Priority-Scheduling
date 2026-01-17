@@ -1,7 +1,7 @@
 """
 FastAPI application entry point.
 """
-from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect, Security
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
