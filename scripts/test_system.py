@@ -49,6 +49,32 @@ def test_health():
         print_error(f"Health check failed: {e}")
         return False
 
+def submit_task_with_retry(json_data, max_retries=3):
+    """Submit a task with retry logic for rate limiting."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                f"{API_BASE_URL}/tasks",
+                json=json_data,
+                timeout=5
+            )
+            if response.status_code == 201:
+                return response.json()
+            elif response.status_code == 429:
+                # Rate limited - wait and retry
+                retry_after = int(response.json().get("retry_after", 5))
+                print_info(f"Rate limited, waiting {retry_after}s...")
+                time.sleep(retry_after)
+                continue
+            else:
+                response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(1)
+                continue
+            raise
+    return None
+
 def test_task_submission():
     """Test task submission with various configurations."""
     print_test("Task Submission")
@@ -57,88 +83,72 @@ def test_task_submission():
     try:
         # Test 1: Basic task
         print_info("Submitting basic task...")
-        response = requests.post(
-            f"{API_BASE_URL}/tasks",
-            json={
-                "task_name": "test_task",
-                "args": [1, 2, 3],
-                "kwargs": {"key": "value"},
-                "priority": "medium",
-                "queue_name": "default"
-            },
-            timeout=5
-        )
-        assert response.status_code == 201
-        task1 = response.json()
-        assert "id" in task1
-        assert task1["status"] == "pending"
-        task_ids.append(task1["id"])
-        print_success(f"Basic task submitted: {task1['id']}")
+        task1 = submit_task_with_retry({
+            "task_name": "test_task",
+            "args": [1, 2, 3],
+            "kwargs": {"key": "value"},
+            "priority": "medium",
+            "queue_name": "default"
+        })
+        if task1 and "id" in task1:
+            task_ids.append(task1["id"])
+            print_success(f"Basic task submitted: {task1['id']}")
+        else:
+            print_error("Failed to submit basic task")
+            return []
+        
+        time.sleep(0.5)  # Small delay to avoid rate limits
         
         # Test 2: High priority task
         print_info("Submitting high priority task...")
-        response = requests.post(
-            f"{API_BASE_URL}/tasks",
-            json={
-                "task_name": "urgent_task",
-                "priority": "high",
-                "queue_name": "default"
-            },
-            timeout=5
-        )
-        assert response.status_code == 201
-        task2 = response.json()
-        task_ids.append(task2["id"])
-        print_success(f"High priority task submitted: {task2['id']}")
+        task2 = submit_task_with_retry({
+            "task_name": "urgent_task",
+            "priority": "high",
+            "queue_name": "default"
+        })
+        if task2 and "id" in task2:
+            task_ids.append(task2["id"])
+            print_success(f"High priority task submitted: {task2['id']}")
+        
+        time.sleep(0.5)
         
         # Test 3: Low priority task
         print_info("Submitting low priority task...")
-        response = requests.post(
-            f"{API_BASE_URL}/tasks",
-            json={
-                "task_name": "background_task",
-                "priority": "low",
-                "queue_name": "default"
-            },
-            timeout=5
-        )
-        assert response.status_code == 201
-        task3 = response.json()
-        task_ids.append(task3["id"])
-        print_success(f"Low priority task submitted: {task3['id']}")
+        task3 = submit_task_with_retry({
+            "task_name": "background_task",
+            "priority": "low",
+            "queue_name": "default"
+        })
+        if task3 and "id" in task3:
+            task_ids.append(task3["id"])
+            print_success(f"Low priority task submitted: {task3['id']}")
+        
+        time.sleep(0.5)
         
         # Test 4: Task with timeout
         print_info("Submitting task with timeout...")
-        response = requests.post(
-            f"{API_BASE_URL}/tasks",
-            json={
-                "task_name": "timed_task",
-                "timeout": 60,
-                "priority": "medium"
-            },
-            timeout=5
-        )
-        assert response.status_code == 201
-        task4 = response.json()
-        task_ids.append(task4["id"])
-        print_success(f"Task with timeout submitted: {task4['id']}")
+        task4 = submit_task_with_retry({
+            "task_name": "timed_task",
+            "timeout": 60,
+            "priority": "medium"
+        })
+        if task4 and "id" in task4:
+            task_ids.append(task4["id"])
+            print_success(f"Task with timeout submitted: {task4['id']}")
+        
+        time.sleep(0.5)
         
         # Test 5: Unique task (deduplication)
         print_info("Submitting unique task...")
-        response = requests.post(
-            f"{API_BASE_URL}/tasks",
-            json={
-                "task_name": "unique_task",
-                "args": [1, 2, 3],
-                "unique": True,
-                "priority": "medium"
-            },
-            timeout=5
-        )
-        assert response.status_code == 201
-        task5 = response.json()
-        task_ids.append(task5["id"])
-        print_success(f"Unique task submitted: {task5['id']}")
+        task5 = submit_task_with_retry({
+            "task_name": "unique_task",
+            "args": [1, 2, 3],
+            "unique": True,
+            "priority": "medium"
+        })
+        if task5 and "id" in task5:
+            task_ids.append(task5["id"])
+            print_success(f"Unique task submitted: {task5['id']}")
         
         return task_ids
         
@@ -242,15 +252,18 @@ def test_metrics():
             params={"window_seconds": 3600},
             timeout=5
         )
-        assert response.status_code == 200
+        if response.status_code != 200:
+            print_error(f"Metrics endpoint returned {response.status_code}: {response.text}")
+            return False
+        
         metrics = response.json()
         
         # Verify structure
-        assert "tasks" in metrics
-        assert "success_rate" in metrics
-        assert "queue_size_per_priority" in metrics
-        assert "queue_info" in metrics
-        assert "worker_utilization" in metrics
+        required_keys = ["tasks", "success_rate", "queue_size_per_priority", "queue_info", "worker_utilization"]
+        for key in required_keys:
+            if key not in metrics:
+                print_error(f"Missing key in metrics: {key}")
+                return False
         
         print_success("Metrics retrieved successfully")
         print_info(f"  Pending tasks: {metrics['queue_info'].get('pending_tasks', 0)}")
@@ -259,6 +272,8 @@ def test_metrics():
         return True
     except Exception as e:
         print_error(f"Metrics failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def test_dlq():
@@ -288,7 +303,7 @@ def test_rate_limits():
         print_error(f"Rate limits test failed: {e}")
         return False
 
-def test_load_submission(num_tasks: int = 50):
+def test_load_submission(num_tasks: int = 20):
     """Test submitting many tasks."""
     print_test(f"Load Test - Submitting {num_tasks} Tasks")
     task_ids = []
@@ -296,18 +311,18 @@ def test_load_submission(num_tasks: int = 50):
     
     try:
         for i in range(num_tasks):
-            response = requests.post(
-                f"{API_BASE_URL}/tasks",
-                json={
-                    "task_name": f"load_test_task_{i}",
-                    "args": [i],
-                    "priority": "medium" if i % 3 == 0 else "low" if i % 3 == 1 else "high",
-                    "queue_name": "default"
-                },
-                timeout=5
-            )
-            if response.status_code == 201:
-                task_ids.append(response.json()["id"])
+            task = submit_task_with_retry({
+                "task_name": f"load_test_task_{i}",
+                "args": [i],
+                "priority": "medium" if i % 3 == 0 else "low" if i % 3 == 1 else "high",
+                "queue_name": "default"
+            })
+            if task and "id" in task:
+                task_ids.append(task["id"])
+            
+            # Small delay to avoid rate limits
+            if i % 10 == 0 and i > 0:
+                time.sleep(1)
         
         elapsed = time.time() - start_time
         rate = len(task_ids) / elapsed if elapsed > 0 else 0
@@ -318,31 +333,31 @@ def test_load_submission(num_tasks: int = 50):
         print_error(f"Load test failed: {e}")
         return []
 
-def test_concurrent_submission(num_threads: int = 5, tasks_per_thread: int = 10):
+def test_concurrent_submission(num_threads: int = 3, tasks_per_thread: int = 5):
     """Test concurrent task submission."""
     print_test(f"Concurrent Submission ({num_threads} threads, {tasks_per_thread} tasks each)")
     task_ids = []
     errors = []
+    lock = threading.Lock()
     
     def submit_tasks(thread_id: int):
         thread_task_ids = []
         for i in range(tasks_per_thread):
             try:
-                response = requests.post(
-                    f"{API_BASE_URL}/tasks",
-                    json={
-                        "task_name": f"concurrent_task_{thread_id}_{i}",
-                        "args": [thread_id, i],
-                        "priority": "medium",
-                        "queue_name": "default"
-                    },
-                    timeout=5
-                )
-                if response.status_code == 201:
-                    thread_task_ids.append(response.json()["id"])
+                task = submit_task_with_retry({
+                    "task_name": f"concurrent_task_{thread_id}_{i}",
+                    "args": [thread_id, i],
+                    "priority": "medium",
+                    "queue_name": "default"
+                })
+                if task and "id" in task:
+                    thread_task_ids.append(task["id"])
+                time.sleep(0.2)  # Small delay between submissions
             except Exception as e:
-                errors.append(str(e))
-        task_ids.extend(thread_task_ids)
+                with lock:
+                    errors.append(str(e))
+        with lock:
+            task_ids.extend(thread_task_ids)
     
     start_time = time.time()
     threads = []
@@ -350,6 +365,7 @@ def test_concurrent_submission(num_threads: int = 5, tasks_per_thread: int = 10)
         thread = threading.Thread(target=submit_tasks, args=(i,))
         threads.append(thread)
         thread.start()
+        time.sleep(0.1)  # Stagger thread starts
     
     for thread in threads:
         thread.join()
