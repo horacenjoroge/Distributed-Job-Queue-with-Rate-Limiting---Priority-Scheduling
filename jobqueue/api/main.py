@@ -1271,6 +1271,13 @@ async def get_metrics(window_seconds: int = 3600):
             },
             "success_rate": metrics.get("success_rate", {}),
             "queue_size_per_priority": metrics.get("queue_size_per_priority", {}),
+            "queue_info": metrics.get("queue_info", {
+                "queue_sizes_by_priority": {},
+                "pending_tasks": 0,
+                "running_tasks": 0,
+                "queues": {},
+                "status_counts": {}
+            }),
             "worker_utilization": metrics.get("worker_utilization", {})
         }
     except Exception as e:

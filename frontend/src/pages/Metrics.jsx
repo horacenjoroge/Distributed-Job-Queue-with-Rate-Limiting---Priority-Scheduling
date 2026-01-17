@@ -125,10 +125,24 @@ const Metrics = () => {
     labels: Object.keys(metrics.queue_size_per_priority || {}),
     datasets: [
       {
-        label: 'Queue Size',
+        label: 'Queue Size by Priority',
         data: Object.values(metrics.queue_size_per_priority || {}),
         backgroundColor: 'rgba(59, 130, 246, 0.5)',
         borderColor: 'rgba(59, 130, 246, 1)',
+        borderWidth: 2
+      }
+    ]
+  }
+  
+  // Queue Info Chart Data (by queue name)
+  const queueInfoData = {
+    labels: Object.keys(metrics.queue_info?.queues || {}),
+    datasets: [
+      {
+        label: 'Pending Tasks by Queue',
+        data: Object.values(metrics.queue_info?.queues || {}),
+        backgroundColor: 'rgba(251, 191, 36, 0.5)',
+        borderColor: 'rgba(251, 191, 36, 1)',
         borderWidth: 2
       }
     ]
@@ -225,7 +239,32 @@ const Metrics = () => {
             </div>
           </div>
         )}
+        
+        {/* Queue Info Chart */}
+        {Object.keys(metrics.queue_info?.queues || {}).length > 0 && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Pending Tasks by Queue</h2>
+            <div className="h-64">
+              <Bar data={queueInfoData} options={chartOptions} />
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Task Status Breakdown */}
+      {metrics.queue_info?.status_counts && Object.keys(metrics.queue_info.status_counts).length > 0 && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Task Status Breakdown</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {Object.entries(metrics.queue_info.status_counts).map(([status, count]) => (
+              <div key={status} className="text-center">
+                <div className="text-2xl font-bold text-gray-900">{count}</div>
+                <div className="text-sm text-gray-500 capitalize">{status}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Detailed Metrics Table */}
       <div className="bg-white rounded-lg shadow-md p-6">
@@ -285,6 +324,18 @@ const Metrics = () => {
                 <dt className="text-gray-600">Idle Workers:</dt>
                 <dd className="font-medium text-gray-900">
                   {metrics.worker_utilization?.idle_workers || 0}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Pending Tasks:</dt>
+                <dd className="font-medium text-gray-900">
+                  {metrics.queue_info?.pending_tasks || 0}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Running Tasks:</dt>
+                <dd className="font-medium text-gray-900">
+                  {metrics.queue_info?.running_tasks || 0}
                 </dd>
               </div>
               <div className="flex justify-between">

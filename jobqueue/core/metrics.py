@@ -269,7 +269,7 @@ class MetricsCollector:
     
     def get_queue_size_per_priority(self) -> Dict[str, int]:
         """
-        Get current queue size per priority.
+        Get current queue size per priority from Redis queues.
         
         Returns:
             Dictionary mapping priority to queue size
@@ -277,22 +277,106 @@ class MetricsCollector:
         try:
             result = {}
             
-            # Get all queues (this is a simplified approach)
-            # In production, you'd track queue names separately
+            # Get queue sizes from PriorityQueue (which uses sorted sets)
+            try:
+                queue = PriorityQueue("default")
+                size_by_priority = queue.size_by_priority()
+                for priority, count in size_by_priority.items():
+                    result[priority.value] = count
+            except Exception as e:
+                log.debug(f"Error getting priority queue sizes: {e}")
+            
+            # Ensure all priorities are represented
             for priority in TaskPriority:
-                # Try to get queue size for default queue
-                try:
-                    queue = PriorityQueue("default")
-                    size = queue.size()
-                    result[priority.value] = size
-                except Exception:
+                if priority.value not in result:
                     result[priority.value] = 0
             
             return result
             
         except Exception as e:
             log.error(f"Error getting queue size per priority: {e}")
+            return {p.value: 0 for p in TaskPriority}
+    
+    def get_task_counts_by_status(self) -> Dict[str, int]:
+        """
+        Get task counts by status from database.
+        
+        Returns:
+            Dictionary mapping status to count
+        """
+        try:
+            from jobqueue.backend.postgres_backend import postgres_backend
+            
+            query = """
+            SELECT status, COUNT(*) as count
+            FROM tasks
+            GROUP BY status
+            """
+            results = postgres_backend.execute_query(query, fetch_all=True)
+            
+            counts = {}
+            if results:
+                for row in results:
+                    counts[row["status"]] = row["count"]
+            
+            # Ensure all statuses are represented
+            for status in TaskStatus:
+                if status.value not in counts:
+                    counts[status.value] = 0
+            
+            return counts
+            
+        except Exception as e:
+            log.error(f"Error getting task counts by status: {e}")
             return {}
+    
+    def get_queue_info(self) -> Dict[str, Any]:
+        """
+        Get detailed queue information including pending tasks.
+        
+        Returns:
+            Dictionary with queue information
+        """
+        try:
+            from jobqueue.backend.postgres_backend import postgres_backend
+            
+            # Get queue sizes from Redis
+            queue_sizes = self.get_queue_size_per_priority()
+            
+            # Get task counts by status from database
+            status_counts = self.get_task_counts_by_status()
+            
+            # Get queue names and their sizes
+            query = """
+            SELECT queue_name, COUNT(*) as count
+            FROM tasks
+            WHERE status IN ('pending', 'queued')
+            GROUP BY queue_name
+            """
+            results = postgres_backend.execute_query(query, fetch_all=True)
+            
+            queues = {}
+            if results:
+                for row in results:
+                    queues[row["queue_name"]] = row["count"]
+            
+            return {
+                "queue_sizes_by_priority": queue_sizes,
+                "pending_tasks": status_counts.get("pending", 0) + status_counts.get("queued", 0),
+                "running_tasks": status_counts.get("running", 0),
+                "queues": queues,
+                "status_counts": status_counts
+            }
+            
+        except Exception as e:
+            log.error(f"Error getting queue info: {e}")
+            return {
+                "queue_sizes_by_priority": {},
+                "pending_tasks": 0,
+                "running_tasks": 0,
+                "queues": {},
+                "status_counts": {}
+            }
     
     def get_worker_utilization(self) -> Dict[str, Any]:
         """
@@ -407,6 +491,8 @@ class MetricsCollector:
             Dictionary with all metrics
         """
         try:
+            queue_info = self.get_queue_info()
+            
             return {
                 "timestamp": self._get_timestamp(),
                 "window_seconds": window_seconds,
@@ -414,7 +500,8 @@ class MetricsCollector:
                 "tasks_completed_per_second": self.get_tasks_completed_per_second(window_seconds),
                 "duration_percentiles": self.get_task_duration_percentiles(window_seconds),
                 "success_rate": self.get_success_rate(window_seconds),
-                "queue_size_per_priority": self.get_queue_size_per_priority(),
+                "queue_size_per_priority": queue_info.get("queue_sizes_by_priority", {}),
+                "queue_info": queue_info,
                 "worker_utilization": self.get_worker_utilization()
             }
             
