@@ -18,6 +18,7 @@ from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.core.worker_monitor import WorkerMonitor
 from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
+from jobqueue.core.metrics import metrics_collector
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from config import settings
@@ -1006,6 +1007,79 @@ async def check_duplicate_task(task_id: str):
         raise
     except Exception as e:
         log.error(f"Error checking duplicate: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/metrics", tags=["Metrics"])
+async def get_metrics(window_seconds: int = 3600):
+    """
+    Get performance metrics.
+    
+    Args:
+        window_seconds: Time window in seconds (default: 3600 = 1 hour)
+        
+    Returns:
+        Dictionary with all metrics
+    """
+    try:
+        metrics = metrics_collector.get_all_metrics(window_seconds)
+        
+        return {
+            "timestamp": metrics.get("timestamp"),
+            "window_seconds": window_seconds,
+            "tasks": {
+                "enqueued_per_second": metrics.get("tasks_enqueued_per_second", 0.0),
+                "completed_per_second": metrics.get("tasks_completed_per_second", 0.0)
+            },
+            "duration_percentiles": {
+                "p50_ms": metrics.get("duration_percentiles", {}).get(0.5, 0.0),
+                "p95_ms": metrics.get("duration_percentiles", {}).get(0.95, 0.0),
+                "p99_ms": metrics.get("duration_percentiles", {}).get(0.99, 0.0)
+            },
+            "success_rate": metrics.get("success_rate", {}),
+            "queue_size_per_priority": metrics.get("queue_size_per_priority", {}),
+            "worker_utilization": metrics.get("worker_utilization", {})
+        }
+    except Exception as e:
+        log.error(f"Error getting metrics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/metrics/aggregate", tags=["Metrics"])
+async def get_aggregated_metrics(
+    aggregation: str = "hourly",
+    timestamp: Optional[float] = None
+):
+    """
+    Get aggregated metrics for a time period.
+    
+    Args:
+        aggregation: Aggregation type ("hourly" or "daily")
+        timestamp: Timestamp to aggregate (defaults to current time)
+        
+    Returns:
+        Aggregated metrics
+    """
+    try:
+        if aggregation not in ["hourly", "daily"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="aggregation must be 'hourly' or 'daily'"
+            )
+        
+        aggregated = metrics_collector.aggregate_metrics(aggregation, timestamp)
+        
+        return aggregated
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting aggregated metrics: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
