@@ -78,11 +78,13 @@ class JobQueue:
             self._push_to_redis(task)
             
             # Publish event
+            # Convert priority to string (handles both enum and string)
+            priority_str = task.priority.value if hasattr(task.priority, 'value') else str(task.priority) if task.priority else "medium"
             event_publisher.publish_task_enqueued(
                 task_id=task.id,
                 task_name=task.name,
                 queue_name=task.queue_name,
-                priority=task.priority.value if task.priority else "medium"
+                priority=priority_str
             )
             
             log.info(f"Task {task.id} queued", extra={"task_id": task.id, "task_name": task_name})

@@ -30,10 +30,20 @@ elif command -v psql &> /dev/null && pg_isready -h localhost -p 5432 &> /dev/nul
     echo "PostgreSQL is running locally (not in Docker)."
     echo "Creating user and database..."
     
+    # Try to connect as current user first, then try postgres user
+    if psql postgres -c "SELECT 1" &>/dev/null; then
+        DB_USER=""
+    elif psql -h localhost -U postgres -d postgres -c "SELECT 1" &>/dev/null; then
+        DB_USER="-U postgres"
+    else
+        echo "Cannot connect to PostgreSQL. Please run as a PostgreSQL superuser or provide credentials."
+        exit 1
+    fi
+    
     # Create user and database locally
-    psql -h localhost -U postgres -c "CREATE USER jobqueue WITH PASSWORD 'jobqueue123';" 2>/dev/null || echo "User 'jobqueue' may already exist"
-    psql -h localhost -U postgres -c "CREATE DATABASE jobqueue OWNER jobqueue;" 2>/dev/null || echo "Database 'jobqueue' may already exist"
-    psql -h localhost -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE jobqueue TO jobqueue;" 2>/dev/null
+    psql $DB_USER postgres -c "CREATE USER jobqueue WITH PASSWORD 'jobqueue123';" 2>/dev/null || echo "User 'jobqueue' may already exist"
+    psql $DB_USER postgres -c "CREATE DATABASE jobqueue OWNER jobqueue;" 2>/dev/null || echo "Database 'jobqueue' may already exist"
+    psql $DB_USER postgres -c "GRANT ALL PRIVILEGES ON DATABASE jobqueue TO jobqueue;" 2>/dev/null
     
     echo ""
     echo "PostgreSQL setup complete!"

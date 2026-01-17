@@ -33,7 +33,7 @@ class EventPublisher:
         """Connect to Redis."""
         if not redis_broker.is_connected():
             redis_broker.connect()
-        self.redis = redis_broker.get_connection()
+        self.redis = redis_broker.client
     
     def publish(self, event_type: str, data: Dict[str, Any]):
         """
