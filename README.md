@@ -1611,6 +1611,154 @@ assert status['current_workers'] > 1  # Workers increased
 - **Worker Startup Time**: Consider worker startup time in scaling decisions
 - **Resource Constraints**: Max workers limit prevents resource exhaustion
 
+### Task Routing
+
+The system supports routing tasks to specific worker types (cpu, io, gpu):
+
+```python
+from jobqueue.core.task import Task, WorkerType, TaskPriority
+from jobqueue.core.task_routing import task_router
+
+# Create CPU task
+task = Task(
+    name="cpu_intensive_task",
+    args=[1, 2, 3],
+    worker_type=WorkerType.CPU,
+    priority=TaskPriority.HIGH
+)
+
+# Route task to CPU queue
+queue_name = task_router.route_task(task)
+# Returns: "queue:cpu:high"
+```
+
+**Worker Types:**
+
+- **CPU**: CPU-intensive tasks (computations, processing)
+- **IO**: I/O-intensive tasks (file operations, network requests)
+- **GPU**: GPU-intensive tasks (machine learning, graphics)
+- **DEFAULT**: Default worker type (no specific requirement)
+
+**Routing Key Format:**
+
+Tasks are routed using the format: `queue:{worker_type}:{priority}`
+
+- `queue:cpu:high` - CPU tasks with high priority
+- `queue:io:medium` - IO tasks with medium priority
+- `queue:gpu:low` - GPU tasks with low priority
+
+**Worker Subscription:**
+
+Workers subscribe to queues based on their type:
+
+```python
+from jobqueue.worker.base_worker import Worker
+from jobqueue.core.task import WorkerType
+
+# CPU worker subscribes to CPU queues
+cpu_worker = Worker(worker_type=WorkerType.CPU)
+# Subscribes to: queue:cpu:high, queue:cpu:medium, queue:cpu:low
+
+# IO worker subscribes to IO queues
+io_worker = Worker(worker_type=WorkerType.IO)
+# Subscribes to: queue:io:high, queue:io:medium, queue:io:low
+```
+
+**Task Routing:**
+
+```python
+from jobqueue.core.redis_queue import Queue
+
+queue = Queue("default")
+
+# Create CPU task
+task = Task(
+    name="cpu_task",
+    args=[1],
+    worker_type=WorkerType.CPU,
+    priority=TaskPriority.HIGH
+)
+
+# Enqueue with routing (default)
+queue.enqueue(task, use_routing=True)
+# Task routed to: queue:cpu:high
+
+# Enqueue without routing
+queue.enqueue(task, use_routing=False)
+# Task goes to: default queue
+```
+
+**Fallback to Default Queue:**
+
+If routing fails, tasks fall back to the default queue:
+
+```python
+# Route with fallback
+queue_name = task_router.route_with_fallback(task)
+# Falls back to default queue if routing fails
+```
+
+**REST API Endpoints:**
+
+```bash
+# Submit task with worker type
+POST /tasks
+{
+  "task_name": "cpu_task",
+  "args": [1, 2, 3],
+  "worker_type": "cpu",
+  "priority": "high"
+}
+
+# Get routing queues
+GET /routing/queues
+
+# Get queues for specific worker type
+GET /routing/queue/cpu
+```
+
+**Test Case: CPU Task → CPU Worker Only**
+
+```python
+# 1. Create CPU task
+task = Task(
+    name="cpu_task",
+    args=[1],
+    worker_type=WorkerType.CPU,
+    priority=TaskPriority.MEDIUM
+)
+
+# 2. Route task
+queue_name = task_router.route_task(task)
+# Returns: "queue:cpu:medium"
+
+# 3. Verify task is in CPU queue only
+cpu_queue = Queue("queue:cpu:medium")
+assert cpu_queue.size() == 1
+
+# 4. Verify task is NOT in other queues
+io_queue = Queue("queue:io:medium")
+gpu_queue = Queue("queue:gpu:medium")
+assert io_queue.size() == 0
+assert gpu_queue.size() == 0
+```
+
+**Task Routing Features:**
+
+- **Worker Type Tagging**: Tasks tagged with worker type requirement
+- **Queue Subscription**: Workers subscribe to specific queues
+- **Routing Key**: Format `queue:{worker_type}:{priority}`
+- **Automatic Routing**: Tasks automatically routed based on worker_type
+- **Fallback Support**: Falls back to default queue if routing fails
+- **Priority Support**: Routing respects task priority
+
+**Deep End: Message Routing Patterns**
+
+- **Pub/Sub Pattern**: Workers subscribe to queues based on type
+- **Direct Routing**: Tasks routed directly to appropriate queues
+- **Queue Isolation**: Each worker type has isolated queues
+- **Priority Queues**: Routing supports priority-based queues
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
