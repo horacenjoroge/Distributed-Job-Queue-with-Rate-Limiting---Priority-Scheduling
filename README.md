@@ -88,6 +88,142 @@ jobqueue/
 - **Logging**: loguru (structured logging)
 - **Containerization**: Docker & Docker Compose
 
+## REST API
+
+The system provides a comprehensive REST API built with FastAPI:
+
+**Base URL**: `http://localhost:8000`
+
+**OpenAPI Documentation**: `http://localhost:8000/docs`
+
+**ReDoc Documentation**: `http://localhost:8000/redoc`
+
+### Authentication
+
+API uses API key authentication via `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: your-api-key" http://localhost:8000/tasks
+```
+
+**Configuration:**
+
+Set `API_KEYS` environment variable (comma-separated):
+```bash
+export API_KEYS="key1,key2,key3"
+```
+
+If no API keys are configured, API is open (development mode).
+
+### Rate Limiting
+
+API has built-in rate limiting:
+- **Per minute**: 60 requests (default)
+- **Per hour**: 1000 requests (default)
+- Tracked per API key or IP address
+- Returns `429 Too Many Requests` when exceeded
+- Rate limit headers included in responses
+
+### Endpoints
+
+#### Tasks
+
+```bash
+# Submit task
+POST /tasks
+{
+  "task_name": "process_data",
+  "args": [1, 2, 3],
+  "kwargs": {"key": "value"},
+  "priority": "high",
+  "max_retries": 3,
+  "timeout": 300,
+  "queue_name": "default",
+  "unique": false,
+  "worker_type": "cpu"
+}
+
+# List tasks (with pagination)
+GET /tasks?skip=0&limit=100&status=pending&queue_name=default
+
+# Get task by ID
+GET /tasks/{task_id}
+
+# Cancel/Delete task
+DELETE /tasks/{task_id}
+
+# Retry task from DLQ
+POST /tasks/{task_id}/retry
+```
+
+#### Queues
+
+```bash
+# List queues with sizes
+GET /queues
+
+# Get queue statistics
+GET /queues/{queue_name}/stats
+
+# Purge queue
+DELETE /queues/{queue_name}
+```
+
+#### Workers
+
+```bash
+# List active workers
+GET /workers
+
+# Get worker details
+GET /workers/{worker_id}
+```
+
+#### Metrics
+
+```bash
+# Get system metrics
+GET /metrics
+
+# Get aggregated metrics
+GET /metrics/aggregate?aggregation=hourly
+```
+
+### Request Validation
+
+All requests are validated using Pydantic models:
+
+- **Task submission**: Validates task_name, args, kwargs, priority, max_retries (0-10), timeout (1-3600), queue_name, etc.
+- **Pagination**: Validates skip (>=0), limit (1-1000)
+- **Error responses**: Returns 422 for validation errors with details
+
+### Error Handling
+
+API returns proper HTTP status codes:
+
+- **200 OK**: Successful request
+- **201 Created**: Resource created
+- **400 Bad Request**: Invalid request parameters
+- **401 Unauthorized**: Missing or invalid API key
+- **404 Not Found**: Resource not found
+- **422 Unprocessable Entity**: Validation error
+- **429 Too Many Requests**: Rate limit exceeded
+- **500 Internal Server Error**: Server error
+
+### OpenAPI Documentation
+
+FastAPI automatically generates OpenAPI documentation:
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
+
+All endpoints are documented with:
+- Request/response schemas
+- Parameter descriptions
+- Example requests
+- Error responses
+
 ## Getting Started
 
 ### Prerequisites
