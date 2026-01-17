@@ -33,9 +33,11 @@ def serialize(record):
     return json.dumps(subset)
 
 
-def patched_writer(message):
-    """Write JSON messages to stdout."""
-    sys.stdout.write(message + "\n")
+def json_sink(message):
+    """Sink function for JSON logging."""
+    record = message.record
+    json_str = serialize(record)
+    sys.stdout.write(json_str + "\n")
 
 
 def setup_logging():
@@ -46,10 +48,9 @@ def setup_logging():
     # Determine format based on configuration
     if settings.log_format == "json":
         logger.add(
-            patched_writer,
-            format=serialize,
+            json_sink,
             level=settings.log_level,
-            serialize=True,
+            serialize=False,
         )
     else:
         # Human-readable format

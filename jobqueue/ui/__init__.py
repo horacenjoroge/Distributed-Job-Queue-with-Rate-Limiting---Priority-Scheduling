@@ -1,3 +1,3 @@
 """
-Web UI for monitoring queues and tasks.
+Web UI for monitoring job queue system.
 """

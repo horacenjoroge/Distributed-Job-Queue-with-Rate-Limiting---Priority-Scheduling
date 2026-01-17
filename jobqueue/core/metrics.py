@@ -10,7 +10,6 @@ from collections import defaultdict
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.core.task import Task, TaskStatus, TaskPriority
 from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
-from jobqueue.core.redis_queue import Queue
 from jobqueue.core.priority_queue import PriorityQueue
 from jobqueue.utils.logger import log
 

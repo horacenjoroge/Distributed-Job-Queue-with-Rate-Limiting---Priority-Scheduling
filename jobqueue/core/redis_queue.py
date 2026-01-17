@@ -4,7 +4,6 @@ Redis-based FIFO queue implementation using LIST data structure.
 from typing import Optional
 from jobqueue.core.task import Task, WorkerType
 from jobqueue.core.task_deduplication import task_deduplication
-from jobqueue.core.task_routing import task_router
 from jobqueue.core.metrics import metrics_collector
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.utils.logger import log
@@ -72,6 +71,8 @@ class Queue:
         # Route task if routing is enabled and worker_type is specified
         if use_routing and task.worker_type and task.worker_type != WorkerType.DEFAULT:
             try:
+                # Lazy import to avoid circular dependency
+                from jobqueue.core.task_routing import task_router
                 # Route to worker type specific queue
                 routed_queue_name = task_router.route_task(task, use_priority_queue=False)
                 log.debug(
