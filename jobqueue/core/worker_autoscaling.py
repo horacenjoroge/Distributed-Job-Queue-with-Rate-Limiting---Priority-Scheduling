@@ -3,7 +3,7 @@ Worker autoscaling system for dynamically adjusting worker count based on queue 
 """
 import time
 import threading
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from datetime import datetime, timedelta
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.core.redis_queue import Queue
