@@ -17,12 +17,12 @@ A robust, production-ready distributed job queue system built from scratch in Py
 - [x] **Task Cancellation** - Cancel running or pending tasks
 
 ### Advanced Features
-- [ ] **Task Recovery** - Handle worker crashes mid-task
-- [ ] **Task Deduplication** - Prevent duplicate task execution
-- [ ] **Web UI** - Monitor queues and tasks via web interface
-- [ ] **Connection Failure Handling** - Graceful handling of Redis/DB failures
-- [ ] **Task Timeouts** - Automatically kill long-running tasks
-- [ ] **Metrics & Observability** - Track duration, success rate, etc.
+- [x] **Task Recovery** - Handle worker crashes mid-task
+- [x] **Task Deduplication** - Prevent duplicate task execution
+- [x] **Web UI** - Monitor queues and tasks via web interface
+- [x] **Connection Failure Handling** - Graceful handling of Redis/DB failures
+- [x] **Task Timeouts** - Automatically kill long-running tasks
+- [x] **Metrics & Observability** - Track duration, success rate, etc.
 
 ## Architecture
 
@@ -223,6 +223,68 @@ All endpoints are documented with:
 - Parameter descriptions
 - Example requests
 - Error responses
+
+## Web Dashboard
+
+A modern React-based web dashboard is available for monitoring and managing the job queue system.
+
+### Features
+
+- **Real-time Updates**: WebSocket integration for live updates
+- **Task Management**: View, filter, search, and manage tasks
+- **Queue Monitoring**: Monitor queue sizes and purge queues
+- **Worker Health**: Track worker status and heartbeat
+- **DLQ Management**: View and retry failed tasks
+- **Metrics Visualization**: Charts for throughput, latency, and success rates
+
+### Setup
+
+1. Navigate to the frontend directory:
+```bash
+cd frontend
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the development server:
+```bash
+npm run dev
+```
+
+The dashboard will be available at `http://localhost:3000`
+
+### Configuration
+
+Create a `.env` file in the `frontend/` directory:
+
+```bash
+VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000
+VITE_API_KEY=your-api-key  # Optional, if API keys are configured
+```
+
+### Pages
+
+- **Home** (`/`): Overview dashboard with key metrics
+- **Tasks** (`/tasks`): List and manage tasks
+- **Task Detail** (`/tasks/:id`): Detailed task information
+- **Queues** (`/queues`): Queue management
+- **Workers** (`/workers`): Worker monitoring
+- **DLQ** (`/dlq`): Dead Letter Queue management
+- **Metrics** (`/metrics`): Performance metrics and charts
+
+### WebSocket
+
+The dashboard uses WebSocket for real-time updates. The WebSocket endpoint is available at `ws://localhost:8000/ws` and broadcasts:
+
+- Task updates (created, completed, failed)
+- Worker status changes
+- Queue size updates
+- DLQ updates
+- Metrics updates
 
 ## Getting Started
 
