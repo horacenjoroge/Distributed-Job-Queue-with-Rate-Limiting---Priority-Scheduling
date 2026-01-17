@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { queueService, workerService, metricsService } from '../services/api'
+import { taskService, queueService, workerService, metricsService } from '../services/api'
 import websocket from '../services/websocket'
 
 const StatCard = ({ title, value, icon, color = 'blue', link }) => {
