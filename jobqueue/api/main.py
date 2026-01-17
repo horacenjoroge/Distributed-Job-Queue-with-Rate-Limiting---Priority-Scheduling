@@ -339,11 +339,16 @@ async def submit_task(request: TaskSubmitRequest, api_key: str = Security(requir
     try:
         queue = JobQueue(name=request.queue_name)
         
+        # Ensure priority is TaskPriority enum
+        priority = request.priority
+        if isinstance(priority, str):
+            priority = TaskPriority(priority.lower())
+        
         task = queue.submit_task(
             task_name=request.task_name,
             args=request.args,
             kwargs=request.kwargs,
-            priority=request.priority,
+            priority=priority,
             max_retries=request.max_retries,
             timeout=request.timeout,
             depends_on=request.depends_on,
