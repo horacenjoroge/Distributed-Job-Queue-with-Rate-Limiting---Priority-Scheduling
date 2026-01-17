@@ -1759,6 +1759,156 @@ assert gpu_queue.size() == 0
 - **Queue Isolation**: Each worker type has isolated queues
 - **Priority Queues**: Routing supports priority-based queues
 
+### Distributed Locks
+
+The system uses distributed locks to prevent concurrent execution of the same task:
+
+```python
+from jobqueue.core.distributed_lock import DistributedLock, task_lock_manager
+from jobqueue.core.task import Task
+
+# Create task
+task = Task(name="my_task", args=[1, 2, 3])
+task.compute_and_set_signature()
+
+# Acquire lock
+lock = task_lock_manager.acquire_task_lock(
+    task_signature=task.task_signature,
+    ttl=300,  # 5 minutes
+    timeout=10,  # Wait up to 10 seconds
+    retry_interval=0.5  # Retry every 0.5 seconds
+)
+
+if lock:
+    try:
+        # Execute task
+        result = execute_task(task)
+    finally:
+        # Release lock
+        lock.release()
+```
+
+**Lock Key Format:**
+
+Locks use the format: `lock:{task_signature}`
+
+- Task signature is SHA256 hash of task name + args + kwargs
+- Each unique task signature gets its own lock
+- Same task signature = same lock = prevents concurrent execution
+
+**Lock Features:**
+
+- **Redis SETNX**: Atomic lock acquisition using Redis SETNX
+- **TTL on Locks**: Automatic expiration prevents deadlocks (default: 300s)
+- **Lock Renewal**: Renew locks for long-running tasks
+- **Retry with Backoff**: Retry lock acquisition with configurable interval
+- **Context Manager**: Use locks as context managers for automatic release
+
+**Worker Integration:**
+
+Workers automatically acquire locks before task execution:
+
+```python
+# Worker automatically:
+# 1. Generates task signature if not set
+# 2. Acquires lock with TTL = max(task.timeout, 60)
+# 3. Waits up to 10 seconds for lock with retry
+# 4. Executes task
+# 5. Releases lock after completion
+# 6. Renews lock for long-running tasks (every 30s)
+```
+
+**Lock Acquisition:**
+
+```python
+from jobqueue.core.distributed_lock import task_lock_manager
+
+# Acquire lock for task
+lock = task_lock_manager.acquire_task_lock(
+    task_signature="abc123...",
+    ttl=300,  # Lock TTL in seconds
+    timeout=10,  # Wait up to 10 seconds
+    retry_interval=0.5  # Retry every 0.5 seconds
+)
+
+if lock:
+    # Lock acquired, proceed with execution
+    pass
+else:
+    # Lock acquisition failed, task may be running concurrently
+    pass
+```
+
+**Lock Release:**
+
+```python
+# Release lock
+lock.release()
+
+# Or use context manager
+with DistributedLock("lock:key", ttl=60) as lock:
+    # Do work
+    pass
+# Lock automatically released
+```
+
+**Lock Renewal:**
+
+```python
+# Renew lock for long-running tasks
+lock.renew(additional_ttl=300)  # Extend by 5 minutes
+```
+
+**REST API Endpoints:**
+
+```bash
+# Get lock status
+GET /locks/{task_signature}
+```
+
+**Test Case: Same Task Twice → Second Waits for First**
+
+```python
+# 1. Create two tasks with same signature
+task1 = Task(name="task", args=[1])
+task1.compute_and_set_signature()
+
+task2 = Task(name="task", args=[1])  # Same args
+task2.compute_and_set_signature()
+
+# 2. First task acquires lock
+lock1 = task_lock_manager.acquire_task_lock(task1.task_signature)
+# Lock acquired
+
+# 3. Second task tries to acquire (waits)
+lock2 = task_lock_manager.acquire_task_lock(
+    task2.task_signature,
+    timeout=10  # Waits up to 10 seconds
+)
+# Waits until lock1 is released
+
+# 4. First task completes and releases lock
+lock1.release()
+
+# 5. Second task acquires lock and executes
+# Lock acquired after first task releases
+```
+
+**Distributed Lock Features:**
+
+- **Atomic Acquisition**: Redis SETNX ensures atomic lock acquisition
+- **TTL Protection**: Locks expire automatically to prevent deadlocks
+- **Lock Renewal**: Extend locks for long-running tasks
+- **Retry Logic**: Automatic retry with backoff for lock acquisition
+- **Context Manager**: Use locks as context managers
+- **Worker Integration**: Automatic lock management in workers
+
+**Deep End: Worker Dies Holding Lock**
+
+- **TTL Saves You**: If worker dies, lock expires after TTL
+- **Lock Renewal**: Long tasks renew locks periodically
+- **Automatic Recovery**: Expired locks allow new workers to acquire
+
 ## Configuration
 
 All configuration is managed through environment variables. See `.env.example` for available options:
