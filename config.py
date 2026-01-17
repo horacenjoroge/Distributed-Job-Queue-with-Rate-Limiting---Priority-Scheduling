@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_workers: int = 4
+    api_keys: Optional[List[str]] = None  # List of valid API keys (comma-separated in env)
     
     # Worker Configuration
     worker_concurrency: int = 4

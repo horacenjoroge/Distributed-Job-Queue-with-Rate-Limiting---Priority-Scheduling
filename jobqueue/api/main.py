@@ -791,7 +791,7 @@ async def get_dlq_task(task_id: str):
 
 
 @app.post("/dlq/{task_id}/retry", tags=["Dead Letter Queue"])
-async def retry_dlq_task(task_id: str, reset_retry_count: bool = True):
+async def retry_dlq_task(task_id: str, reset_retry_count: bool = True, api_key: str = Security(require_api_key)):
     """
     Retry a task from Dead Letter Queue.
     
@@ -934,7 +934,7 @@ async def list_workers():
 
 
 @app.get("/workers/{worker_id}", tags=["Workers"])
-async def get_worker(worker_id: str):
+async def get_worker(worker_id: str, api_key: str = Security(require_api_key)):
     """
     Get information about a specific worker.
     
