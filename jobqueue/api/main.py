@@ -148,6 +148,10 @@ async def startup_event():
         postgres_backend.initialize_schema()
         log.info("Database schema initialized")
         
+        # Start event subscriber for WebSocket updates
+        await event_subscriber.start()
+        log.info("Event subscriber started")
+        
         log.info("API server started successfully")
     except Exception as e:
         log.error(f"Failed to start API server: {e}")
@@ -180,6 +184,10 @@ async def websocket_endpoint(websocket: WebSocket):
 async def shutdown_event():
     """Clean up connections on shutdown."""
     log.info("Shutting down API server...")
+    
+    # Stop event subscriber
+    await event_subscriber.stop()
+    
     redis_broker.disconnect()
     postgres_backend.disconnect()
     log.info("API server shut down successfully")

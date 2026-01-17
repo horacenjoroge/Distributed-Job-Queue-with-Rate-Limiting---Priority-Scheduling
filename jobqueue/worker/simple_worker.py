@@ -25,6 +25,7 @@ from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
 from jobqueue.core.distributed_lock import task_lock_manager
 from jobqueue.core.metrics import metrics_collector
+from jobqueue.core.event_publisher import event_publisher
 from jobqueue.backend.result_backend import result_backend
 from jobqueue.utils.logger import log
 from config import settings
@@ -239,6 +240,9 @@ class SimpleWorker(Worker):
         task.mark_running(self.worker_id)
         task.started_at = datetime.utcnow()
         
+        # Publish task started event
+        event_publisher.publish_task_started(task.id, self.worker_id)
+        
         # Generate task signature if not set (for distributed locking)
         if not task.task_signature:
             task.compute_and_set_signature()
@@ -365,6 +369,9 @@ class SimpleWorker(Worker):
                 task_dependency_graph.set_task_status(task.id, TaskStatus.CANCELLED)
                 task_cancellation.complete_cancellation(task.id)
                 
+                # Publish task cancelled event
+                event_publisher.publish_task_cancelled(task.id, cancel_reason.value if hasattr(cancel_reason, 'value') else str(cancel_reason))
+                
                 # Cancel dependent tasks
                 self._cancel_dependent_tasks(task)
                 
@@ -429,6 +436,14 @@ class SimpleWorker(Worker):
             # Record metrics
             duration = task.execution_time() or 0.0
             metrics_collector.record_task_completed(task, duration, success=True)
+            
+            # Publish task completed event
+            event_publisher.publish_task_completed(
+                task.id,
+                self.worker_id,
+                duration=duration,
+                result=result
+            )
             
             log.info(
                 f"Task {task.id} completed successfully",
@@ -502,6 +517,14 @@ class SimpleWorker(Worker):
             # Update status in deduplication tracking
             if task.unique:
                 task_deduplication.update_task_status(task)
+            
+            # Publish task failed event
+            event_publisher.publish_task_failed(
+                task.id,
+                self.worker_id,
+                error=error_msg,
+                retry_count=task.retry_count
+            )
             
             # Cancel dependent tasks if this task failed
             self._cancel_dependent_tasks(task)

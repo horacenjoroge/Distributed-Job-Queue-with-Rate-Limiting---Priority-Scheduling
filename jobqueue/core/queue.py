@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from jobqueue.core.task import Task, TaskStatus, TaskPriority
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
+from jobqueue.core.event_publisher import event_publisher
 from jobqueue.broker.redis_broker import redis_broker
 from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.utils.logger import log
@@ -75,6 +76,15 @@ class JobQueue:
         if task.is_ready():
             task.status = TaskStatus.QUEUED
             self._push_to_redis(task)
+            
+            # Publish event
+            event_publisher.publish_task_enqueued(
+                task_id=task.id,
+                task_name=task.name,
+                queue_name=task.queue_name,
+                priority=task.priority.value if task.priority else "medium"
+            )
+            
             log.info(f"Task {task.id} queued", extra={"task_id": task.id, "task_name": task_name})
         else:
             log.info(
