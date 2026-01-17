@@ -318,10 +318,16 @@ The dashboard uses WebSocket for real-time updates. The WebSocket endpoint is av
    cd "Distributed Job Queue with Rate Limiting & Priority Scheduling"
    ```
 
-2. **Create virtual environment**
+2. **Create virtual environment** (if not already created)
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+   
+   If you don't have a virtual environment, create one:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
 3. **Install dependencies**
