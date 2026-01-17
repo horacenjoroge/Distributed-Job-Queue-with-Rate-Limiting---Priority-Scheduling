@@ -1087,6 +1087,181 @@ async def get_aggregated_metrics(
         )
 
 
+@app.post("/worker-pools", tags=["Worker Pools"])
+async def create_worker_pool(
+    pool_name: str,
+    queue_name: str = "default",
+    initial_workers: int = 1
+):
+    """
+    Create a new worker pool.
+    
+    Args:
+        pool_name: Name of the worker pool
+        queue_name: Queue name for workers
+        initial_workers: Initial number of workers to start
+        
+    Returns:
+        Pool creation result
+    """
+    try:
+        from jobqueue.worker.simple_worker import SimpleWorker
+        
+        pool = distributed_worker_manager.create_pool(
+            pool_name=pool_name,
+            worker_class=SimpleWorker,
+            queue_name=queue_name,
+            initial_workers=initial_workers
+        )
+        
+        pool.start()
+        
+        return {
+            "message": f"Worker pool {pool_name} created and started",
+            "pool_name": pool_name,
+            "queue_name": queue_name,
+            "initial_workers": initial_workers,
+            "status": pool.get_pool_status()
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        log.error(f"Error creating worker pool: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/worker-pools", tags=["Worker Pools"])
+async def list_worker_pools():
+    """List all worker pools."""
+    try:
+        status = distributed_worker_manager.get_all_pools_status()
+        return status
+    except Exception as e:
+        log.error(f"Error listing worker pools: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/worker-pools/{pool_name}", tags=["Worker Pools"])
+async def get_worker_pool(pool_name: str):
+    """Get worker pool status."""
+    try:
+        pool = distributed_worker_manager.get_pool(pool_name)
+        
+        if not pool:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker pool {pool_name} not found"
+            )
+        
+        return pool.get_pool_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting worker pool: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.post("/worker-pools/{pool_name}/scale-up", tags=["Worker Pools"])
+async def scale_up_worker_pool(pool_name: str, count: int = 1):
+    """Scale up worker pool by adding workers."""
+    try:
+        pool = distributed_worker_manager.get_pool(pool_name)
+        
+        if not pool:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker pool {pool_name} not found"
+            )
+        
+        new_workers = pool.scale_up(count)
+        
+        return {
+            "message": f"Scaled up pool {pool_name} by {count} workers",
+            "pool_name": pool_name,
+            "added_workers": len(new_workers),
+            "new_worker_ids": new_workers,
+            "total_workers": len(pool.workers)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error scaling up worker pool: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.post("/worker-pools/{pool_name}/scale-down", tags=["Worker Pools"])
+async def scale_down_worker_pool(pool_name: str, count: int = 1):
+    """Scale down worker pool by removing workers."""
+    try:
+        pool = distributed_worker_manager.get_pool(pool_name)
+        
+        if not pool:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker pool {pool_name} not found"
+            )
+        
+        removed_workers = pool.scale_down(count)
+        
+        return {
+            "message": f"Scaled down pool {pool_name} by {len(removed_workers)} workers",
+            "pool_name": pool_name,
+            "removed_workers": len(removed_workers),
+            "removed_worker_ids": removed_workers,
+            "total_workers": len(pool.workers)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error scaling down worker pool: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.delete("/worker-pools/{pool_name}", tags=["Worker Pools"])
+async def delete_worker_pool(pool_name: str, graceful: bool = True):
+    """Delete a worker pool."""
+    try:
+        success = distributed_worker_manager.remove_pool(pool_name, graceful=graceful)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Worker pool {pool_name} not found"
+            )
+        
+        return {
+            "message": f"Worker pool {pool_name} deleted",
+            "pool_name": pool_name,
+            "graceful": graceful
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting worker pool: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 def main():
     """Main entry point for the API server."""
     log.info(
