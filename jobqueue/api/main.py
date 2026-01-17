@@ -201,6 +201,10 @@ async def submit_task(request: TaskSubmitRequest):
         if request.unique:
             task.unique = True
         
+        # Set worker type if specified
+        if request.worker_type:
+            task.worker_type = request.worker_type
+        
         return TaskResponse(
             id=task.id,
             name=task.name,
