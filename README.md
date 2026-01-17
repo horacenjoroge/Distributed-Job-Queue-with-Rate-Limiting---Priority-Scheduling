@@ -2157,16 +2157,44 @@ All configuration is managed through environment variables. See `.env.example` f
 
 ## Testing
 
+Comprehensive test suite with 90%+ coverage target.
+
+### Test Structure
+
+- **Unit Tests**: Individual component tests
+- **Integration Tests**: Component interaction tests
+- **Load Tests**: 1000+ tasks, multiple workers
+- **Race Condition Tests**: Multiple workers, concurrent operations
+- **Failure Recovery Tests**: Worker crashes, timeouts, recovery
+
+### Running Tests
+
 ```bash
 # Run all tests
 pytest
 
-# Run with coverage
+# Run with coverage report
 pytest --cov=jobqueue --cov-report=html
 
-# Run specific test file
-pytest tests/test_queue.py
+# Run specific test categories
+pytest -m unit          # Unit tests only
+pytest -m integration  # Integration tests
+pytest -m load          # Load tests
+pytest -m race          # Race condition tests
+pytest -m failure       # Failure recovery tests
 ```
+
+### Load Testing with Locust
+
+```bash
+# Start Locust web UI
+locust -f locustfile.py --host=http://localhost:8000
+
+# Run headless load test
+locust -f locustfile.py --host=http://localhost:8000 --headless -u 100 -r 10 -t 60s
+```
+
+See `tests/README.md` for detailed testing documentation.
 
 ## Monitoring
 
