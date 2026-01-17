@@ -184,7 +184,7 @@ const Metrics = () => {
         </div>
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="text-2xl font-bold text-gray-900">
-            {metrics.worker_utilization?.toFixed(1) || '0.0'}%
+            {(metrics.worker_utilization?.utilization_percent || 0).toFixed(1)}%
           </div>
           <div className="text-sm text-gray-500">Worker Utilization</div>
         </div>
@@ -217,9 +217,9 @@ const Metrics = () => {
         </div>
 
         {/* Queue Sizes Chart */}
-        {Object.keys(metrics.queue_sizes || {}).length > 0 && (
+        {Object.keys(metrics.queue_size_per_priority || {}).length > 0 && (
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Queue Sizes</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Queue Sizes by Priority</h2>
             <div className="h-64">
               <Bar data={queueSizesData} options={chartOptions} />
             </div>
@@ -235,21 +235,33 @@ const Metrics = () => {
             <div className="text-sm font-medium text-gray-500 mb-2">Task Statistics</div>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <dt className="text-gray-600">Total Tasks Enqueued:</dt>
-                <dd className="font-medium text-gray-900">{metrics.total_tasks_enqueued || 0}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Total Tasks Completed:</dt>
-                <dd className="font-medium text-gray-900">{metrics.total_tasks_completed || 0}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Total Tasks Failed:</dt>
-                <dd className="font-medium text-gray-900">{metrics.total_tasks_failed || 0}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Average Duration:</dt>
+                <dt className="text-gray-600">Tasks Enqueued/sec:</dt>
                 <dd className="font-medium text-gray-900">
-                  {metrics.task_duration_avg?.toFixed(2) || '0.00'}s
+                  {(metrics.tasks?.enqueued_per_second || 0).toFixed(2)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Tasks Completed/sec:</dt>
+                <dd className="font-medium text-gray-900">
+                  {(metrics.tasks?.completed_per_second || 0).toFixed(2)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Success Rate:</dt>
+                <dd className="font-medium text-gray-900">
+                  {((metrics.success_rate?.success_rate || 0) * 100).toFixed(1)}%
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Failure Rate:</dt>
+                <dd className="font-medium text-gray-900">
+                  {((metrics.success_rate?.failure_rate || 0) * 100).toFixed(1)}%
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-600">Total Completed:</dt>
+                <dd className="font-medium text-gray-900">
+                  {metrics.success_rate?.total || 0}
                 </dd>
               </div>
             </dl>
@@ -258,22 +270,34 @@ const Metrics = () => {
             <div className="text-sm font-medium text-gray-500 mb-2">System Statistics</div>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
+                <dt className="text-gray-600">Total Workers:</dt>
+                <dd className="font-medium text-gray-900">
+                  {metrics.worker_utilization?.total_workers || 0}
+                </dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-gray-600">Active Workers:</dt>
-                <dd className="font-medium text-gray-900">{metrics.active_workers || 0}</dd>
+                <dd className="font-medium text-gray-900">
+                  {metrics.worker_utilization?.active_workers || 0}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-600">Idle Workers:</dt>
-                <dd className="font-medium text-gray-900">{metrics.idle_workers || 0}</dd>
+                <dd className="font-medium text-gray-900">
+                  {metrics.worker_utilization?.idle_workers || 0}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-600">Total Queue Size:</dt>
                 <dd className="font-medium text-gray-900">
-                  {Object.values(metrics.queue_sizes || {}).reduce((a, b) => a + b, 0)}
+                  {Object.values(metrics.queue_size_per_priority || {}).reduce((a, b) => a + b, 0)}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-600">DLQ Size:</dt>
-                <dd className="font-medium text-gray-900">{metrics.dlq_size || 0}</dd>
+                <dt className="text-gray-600">Worker Utilization:</dt>
+                <dd className="font-medium text-gray-900">
+                  {(metrics.worker_utilization?.utilization_percent || 0).toFixed(1)}%
+                </dd>
               </div>
             </dl>
           </div>
