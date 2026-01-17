@@ -272,7 +272,7 @@ async def list_tasks(
         params.extend([limit, offset])
         
         # Get tasks
-        results = postgres_backend.execute_query(query, params=params, fetch_all=True)
+        results = postgres_backend.execute_query(query, params=tuple(params) if params else None, fetch_all=True)
         
         # Get total count for pagination
         count_query = "SELECT COUNT(*) as total FROM tasks WHERE 1=1"
@@ -288,7 +288,7 @@ async def list_tasks(
         
         count_result = postgres_backend.execute_query(
             count_query,
-            params=count_params,
+            params=tuple(count_params) if count_params else None,
             fetch_all=True
         )
         total = count_result[0]["total"] if count_result else 0
