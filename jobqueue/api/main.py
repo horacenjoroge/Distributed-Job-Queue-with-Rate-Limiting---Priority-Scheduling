@@ -142,12 +142,29 @@ async def startup_event():
         log.info("Connected to Redis")
         
         # Connect to PostgreSQL
-        postgres_backend.connect()
-        log.info("Connected to PostgreSQL")
-        
-        # Initialize database schema
-        postgres_backend.initialize_schema()
-        log.info("Database schema initialized")
+        try:
+            postgres_backend.connect()
+            log.info("Connected to PostgreSQL")
+            
+            # Initialize database schema
+            postgres_backend.initialize_schema()
+            log.info("Database schema initialized")
+        except Exception as pg_error:
+            error_msg = str(pg_error)
+            if "role" in error_msg.lower() and "does not exist" in error_msg.lower():
+                log.error(
+                    "PostgreSQL user/database not found. "
+                    "Please run: ./scripts/setup_postgres.sh"
+                )
+            elif "connection" in error_msg.lower():
+                log.error(
+                    "Failed to connect to PostgreSQL. "
+                    "Make sure PostgreSQL is running: docker-compose up -d postgres"
+                )
+            else:
+                log.error(f"PostgreSQL connection error: {pg_error}")
+            # Don't raise - allow API to start without PostgreSQL for basic functionality
+            log.warning("Continuing without PostgreSQL - some features may be limited")
         
         # Start event subscriber for WebSocket updates
         await event_subscriber.start()
