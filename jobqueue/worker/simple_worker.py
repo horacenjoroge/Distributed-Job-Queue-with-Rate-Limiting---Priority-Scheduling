@@ -439,6 +439,10 @@ class SimpleWorker(Worker):
                 }
             )
             
+            # Release distributed lock after successful completion
+            if task_lock:
+                task_lock.release()
+            
         except TimeoutError as e:
             # Task timed out
             error_msg = str(e)
@@ -479,6 +483,10 @@ class SimpleWorker(Worker):
             # Timeouts typically shouldn't be retried, but allow it if configured
             self._handle_task_failure(task, exception=e)
             
+            # Release lock after failure handling
+            if task_lock:
+                task_lock.release()
+            
         except Exception as e:
             # Task failed
             error_msg = str(e)
@@ -512,6 +520,10 @@ class SimpleWorker(Worker):
             
             # Handle failure (retry or dead letter queue)
             self._handle_task_failure(task, exception=e)
+            
+            # Release lock after failure handling
+            if task_lock:
+                task_lock.release()
         
         finally:
             # Stop timeout manager
