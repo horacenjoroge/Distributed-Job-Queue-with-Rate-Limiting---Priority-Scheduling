@@ -280,11 +280,26 @@ VITE_API_KEY=your-api-key  # Optional, if API keys are configured
 
 The dashboard uses WebSocket for real-time updates. The WebSocket endpoint is available at `ws://localhost:8000/ws` and broadcasts:
 
-- Task updates (created, completed, failed)
+- Task updates (created, completed, failed, cancelled)
 - Worker status changes
 - Queue size updates
 - DLQ updates
 - Metrics updates
+
+**Event Flow:**
+1. Workers publish events to Redis Pub/Sub when tasks are enqueued, started, completed, or failed
+2. API server subscribes to Redis Pub/Sub events
+3. API server forwards events to connected WebSocket clients
+4. Dashboard receives events and updates UI in real-time without page refresh
+
+**Event Types:**
+- `task_enqueued`: Task added to queue
+- `task_started`: Task execution began
+- `task_completed`: Task completed successfully
+- `task_failed`: Task failed with error
+- `task_cancelled`: Task was cancelled
+- `queue_updated`: Queue size changed
+- `worker_heartbeat`: Worker status update
 
 ## Getting Started
 
