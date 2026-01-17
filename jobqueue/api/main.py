@@ -19,6 +19,7 @@ from jobqueue.core.worker_monitor import WorkerMonitor
 from jobqueue.core.task_deduplication import task_deduplication
 from jobqueue.core.task_cancellation import task_cancellation, CancellationReason
 from jobqueue.core.metrics import metrics_collector
+from jobqueue.core.worker_pool import distributed_worker_manager, WorkerPool
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from config import settings
