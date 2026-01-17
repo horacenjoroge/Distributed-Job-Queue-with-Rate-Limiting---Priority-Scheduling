@@ -33,6 +33,7 @@ from jobqueue.core.worker_autoscaling import (
 from jobqueue.backend.result_backend import result_backend, TaskResult
 from jobqueue.utils.logger import log
 from jobqueue.api.websocket_manager import websocket_manager
+from jobqueue.api.event_subscriber import event_subscriber
 from config import settings
 
 
