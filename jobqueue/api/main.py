@@ -236,6 +236,95 @@ async def health_check():
     )
 
 
+@app.get("/tasks", tags=["Tasks"])
+async def list_tasks(
+    limit: int = 100,
+    offset: int = 0,
+    status: Optional[TaskStatus] = None,
+    queue_name: Optional[str] = None
+):
+    """
+    List tasks with pagination and optional filtering.
+    
+    Args:
+        limit: Maximum number of tasks to retrieve (default: 100)
+        offset: Offset for pagination (default: 0)
+        status: Filter by task status (optional)
+        queue_name: Filter by queue name (optional)
+        
+    Returns:
+        List of tasks with pagination info
+    """
+    try:
+        # Build query
+        query = "SELECT * FROM tasks WHERE 1=1"
+        params = []
+        
+        if status:
+            query += " AND status = %s"
+            params.append(status.value)
+        
+        if queue_name:
+            query += " AND queue_name = %s"
+            params.append(queue_name)
+        
+        query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        # Get tasks
+        results = postgres_backend.execute_query(query, params=params, fetch_all=True)
+        
+        # Get total count for pagination
+        count_query = "SELECT COUNT(*) as total FROM tasks WHERE 1=1"
+        count_params = []
+        
+        if status:
+            count_query += " AND status = %s"
+            count_params.append(status.value)
+        
+        if queue_name:
+            count_query += " AND queue_name = %s"
+            count_params.append(queue_name)
+        
+        count_result = postgres_backend.execute_query(
+            count_query,
+            params=count_params,
+            fetch_all=True
+        )
+        total = count_result[0]["total"] if count_result else 0
+        
+        # Convert to response format
+        tasks = []
+        if results:
+            for row in results:
+                tasks.append({
+                    "id": row["id"],
+                    "name": row["name"],
+                    "priority": row["priority"],
+                    "status": row["status"],
+                    "queue_name": row["queue_name"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+                    "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                    "retry_count": row["retry_count"],
+                    "max_retries": row["max_retries"],
+                    "worker_id": row["worker_id"],
+                })
+        
+        return {
+            "tasks": tasks,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        log.error(f"Error listing tasks: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"])
 async def submit_task(request: TaskSubmitRequest, api_key: str = Security(require_api_key)):
     """
