@@ -26,7 +26,7 @@ class EventSubscriber:
         """Connect to Redis and subscribe to events."""
         if not redis_broker.is_connected():
             redis_broker.connect()
-        self.redis = redis_broker.get_connection()
+        self.redis = redis_broker.client
         self.pubsub = self.redis.pubsub()
         self.pubsub.subscribe(self.ALL_CHANNEL)
         log.info("Subscribed to Redis Pub/Sub events")
