@@ -335,7 +335,54 @@ The dashboard uses WebSocket for real-time updates. The WebSocket endpoint is av
    pip install -r requirements.txt
    ```
 
-4. **Configure environment**
+4. **Start Redis and PostgreSQL** (using Docker Compose)
+   ```bash
+   # Start services
+   docker-compose up -d redis postgres
+   
+   # Or use the helper script
+   chmod +x scripts/start_services.sh
+   ./scripts/start_services.sh
+   ```
+   
+   Alternatively, if you have Redis and PostgreSQL running locally, update `.env` with your connection details.
+
+5. **Start the Backend API**
+   ```bash
+   # Activate virtual environment
+   source venv/bin/activate
+   
+   # Start API server
+   python -m jobqueue.api.main
+   
+   # Or use the helper script
+   chmod +x scripts/start_backend.sh
+   ./scripts/start_backend.sh
+   ```
+   
+   The API will be available at `http://localhost:8000`
+   - API Docs: http://localhost:8000/docs
+   - ReDoc: http://localhost:8000/redoc
+
+6. **Start the Frontend** (in a new terminal)
+   ```bash
+   # Navigate to frontend directory
+   cd frontend
+   
+   # Install dependencies (first time only)
+   npm install
+   
+   # Start development server
+   npm run dev
+   
+   # Or use the helper script (from project root)
+   chmod +x scripts/start_frontend.sh
+   ./scripts/start_frontend.sh
+   ```
+   
+   The frontend will be available at `http://localhost:3000`
+
+7. **Configure environment**
    ```bash
    cp .env.example .env
    # Edit .env with your configuration
