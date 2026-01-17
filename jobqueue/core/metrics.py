@@ -307,6 +307,11 @@ class MetricsCollector:
         try:
             from jobqueue.backend.postgres_backend import postgres_backend
             
+            # Check if database is connected
+            if not postgres_backend.is_connected():
+                log.debug("PostgreSQL not connected, returning empty status counts")
+                return {}
+            
             query = """
             SELECT status, COUNT(*) as count
             FROM tasks
@@ -346,19 +351,23 @@ class MetricsCollector:
             # Get task counts by status from database
             status_counts = self.get_task_counts_by_status()
             
-            # Get queue names and their sizes
-            query = """
-            SELECT queue_name, COUNT(*) as count
-            FROM tasks
-            WHERE status IN ('pending', 'queued')
-            GROUP BY queue_name
-            """
-            results = postgres_backend.execute_query(query, fetch_all=True)
-            
+            # Get queue names and their sizes (only if database is connected)
             queues = {}
-            if results:
-                for row in results:
-                    queues[row["queue_name"]] = row["count"]
+            if postgres_backend.is_connected():
+                try:
+                    query = """
+                    SELECT queue_name, COUNT(*) as count
+                    FROM tasks
+                    WHERE status IN ('pending', 'queued')
+                    GROUP BY queue_name
+                    """
+                    results = postgres_backend.execute_query(query, fetch_all=True)
+                    
+                    if results:
+                        for row in results:
+                            queues[row["queue_name"]] = row["count"]
+                except Exception as e:
+                    log.debug(f"Error getting queue sizes from database: {e}")
             
             return {
                 "queue_sizes_by_priority": queue_sizes,
