@@ -45,6 +45,7 @@ const Home = () => {
       clearInterval(interval)
       websocket.off('task_updated', handleTaskUpdate)
       websocket.off('worker_updated', handleWorkerUpdate)
+      websocket.off('queue_updated', handleQueueUpdate)
     }
   }, [])
 
@@ -52,14 +53,36 @@ const Home = () => {
     websocket.connect()
     websocket.on('task_updated', handleTaskUpdate)
     websocket.on('worker_updated', handleWorkerUpdate)
+    websocket.on('queue_updated', handleQueueUpdate)
   }
 
   const handleTaskUpdate = (data) => {
+    // Update stats immediately when task events occur
+    if (data.task) {
+      // Update recent tasks list
+      setStats(prev => {
+        const updatedTasks = [data.task, ...prev.recentTasks.filter(t => t.id !== data.task.id)].slice(0, 10)
+        return { ...prev, recentTasks: updatedTasks }
+      })
+    }
+    // Also refresh full data periodically
     loadData()
   }
 
   const handleWorkerUpdate = (data) => {
     loadData()
+  }
+
+  const handleQueueUpdate = (data) => {
+    // Update queue sizes immediately
+    if (data.queue_name && data.size >= 0) {
+      setStats(prev => ({
+        ...prev,
+        queueSizes: { ...prev.queueSizes, [data.queue_name]: data.size }
+      }))
+    } else {
+      loadData() // Refresh if size is -1 (indicates full refresh needed)
+    }
   }
 
   const loadData = async () => {
