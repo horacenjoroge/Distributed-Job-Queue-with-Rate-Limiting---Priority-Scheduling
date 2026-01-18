@@ -395,6 +395,11 @@ class Worker:
             task: Task to execute
             result_queue: Queue to store result
         """
+        # Re-register test tasks in this subprocess
+        # (multiprocessing creates fresh imports, so overrides are lost)
+        from jobqueue.worker.main import _register_test_tasks
+        _register_test_tasks()
+        
         try:
             result = task_registry.execute(task.name, *task.args, **task.kwargs)
             result_queue.put(result)
