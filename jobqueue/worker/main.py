@@ -168,18 +168,23 @@ class Worker:
                 # Try to get task from each priority queue
                 task = None
                 for priority in priorities:
-                    # Check rate limit before processing
+                    # Check rate limit before processing (skip if rate limited)
                     if not rate_limiter.can_process("default", priority):
                         log.debug(f"Rate limit reached for priority {priority}, skipping")
                         continue
                     
-                    queue_key = f"queue:default:{priority}"
+                    # Use priority.value to get string (high, medium, low)
+                    queue_key = f"queue:default:{priority.value}"
                     task_json = redis_broker.pop_task(queue_key, timeout=1)
                     
                     if task_json:
                         task = Task.from_json(task_json)
                         # Increment rate limit counter
                         rate_limiter.increment("default", priority)
+                        log.info(
+                            f"Worker {self.worker_id} got task from {queue_key}",
+                            extra={"task_id": task.id, "priority": priority.value}
+                        )
                         break
                 
                 if task:
