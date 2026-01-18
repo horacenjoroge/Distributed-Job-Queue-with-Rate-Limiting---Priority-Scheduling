@@ -149,6 +149,12 @@ class Worker:
         # Update worker status in database
         self._update_worker_status("stopped")
         
+        # Remove heartbeat from Redis (worker is stopping)
+        try:
+            worker_heartbeat.remove_worker(self.worker_id)
+        except Exception as e:
+            log.warning(f"Error removing worker heartbeat: {e}")
+        
         # Disconnect from services
         redis_broker.disconnect()
         postgres_backend.disconnect()
