@@ -20,7 +20,7 @@ from config import settings
 
 
 def _register_test_tasks():
-    """Register generic test task handlers for load testing."""
+    """Register generic test task handlers for load testing and testing."""
     def generic_test_task(*args, **kwargs):
         """Generic test task that simulates work."""
         import time
@@ -30,25 +30,35 @@ def _register_test_tasks():
         return {"result": f"Processed with args={args}, kwargs={kwargs}"}
     
     # Register the generic test task function
-    # This will be used as a fallback for any load_test_task_* name
     task_registry.register_function("load_test_task", generic_test_task)
     
     # Store original methods
     original_execute = task_registry.execute
     original_is_registered = task_registry.is_registered
     
+    # Test task name patterns that should use the generic handler
+    test_task_patterns = [
+        "load_test_task_",
+        "concurrent_task_",
+        "test_task_",
+    ]
+    
+    def is_test_task(name: str) -> bool:
+        """Check if a task name matches test task patterns."""
+        return any(name.startswith(pattern) for pattern in test_task_patterns)
+    
     # Override execute to handle test tasks
     def execute_with_test_fallback(name: str, *args, **kwargs):
         """Execute task with fallback to generic test task."""
-        if name.startswith("load_test_task_"):
-            # Use the generic test task for any load_test_task_* name
+        if is_test_task(name):
+            # Use the generic test task for any test task pattern
             return generic_test_task(*args, **kwargs)
         return original_execute(name, *args, **kwargs)
     
     # Override is_registered to return True for test tasks
     def is_registered_with_test_fallback(name: str) -> bool:
         """Check if task is registered, including test tasks."""
-        if name.startswith("load_test_task_"):
+        if is_test_task(name):
             return True
         return original_is_registered(name)
     
@@ -56,7 +66,7 @@ def _register_test_tasks():
     task_registry.execute = execute_with_test_fallback
     task_registry.is_registered = is_registered_with_test_fallback
     
-    log.info("Registered generic test task handlers for load testing")
+    log.info("Registered generic test task handlers for load testing and testing")
 
 
 class Worker:
