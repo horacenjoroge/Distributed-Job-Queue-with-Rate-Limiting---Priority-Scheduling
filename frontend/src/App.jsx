@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import Home from './pages/Home'
 import Tasks from './pages/Tasks'
+import NewTask from './pages/NewTask'
 import TaskDetail from './pages/TaskDetail'
 import Queues from './pages/Queues'
 import Workers from './pages/Workers'
@@ -16,6 +17,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/new" element={<NewTask />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/queues" element={<Queues />} />
           <Route path="/workers" element={<Workers />} />

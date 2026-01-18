@@ -90,19 +90,30 @@ const Home = () => {
       setLoading(true)
 
       // Load queues
-      const queuesRes = await queueService.list()
-      const queues = queuesRes.data.queues || []
-      const queueSizes = {}
+      let queues = []
+      let queueSizes = {}
       let totalTasks = 0
-      queues.forEach(q => {
-        queueSizes[q.queue_name] = q.size || 0
-        totalTasks += q.size || 0
-      })
+      try {
+        const queuesRes = await queueService.list()
+        queues = queuesRes.data.queues || []
+        queues.forEach(q => {
+          queueSizes[q.queue_name] = q.size || 0
+          totalTasks += q.size || 0
+        })
+      } catch (e) {
+        console.error('Error loading queues:', e)
+      }
 
       // Load workers
-      const workersRes = await workerService.list()
-      const workers = workersRes.data.workers || []
-      const activeWorkers = workers.filter(w => w.status === 'active' || w.is_alive).length
+      let workers = []
+      let activeWorkers = 0
+      try {
+        const workersRes = await workerService.list()
+        workers = workersRes.data.workers || []
+        activeWorkers = workers.filter(w => w.status === 'active' || w.is_alive).length
+      } catch (e) {
+        console.error('Error loading workers:', e)
+      }
 
       // Load metrics for success rate
       let successRate = 0
@@ -119,8 +130,13 @@ const Home = () => {
       }
 
       // Load recent tasks
-      const tasksRes = await taskService.list({ limit: 10 })
-      const recentTasks = tasksRes.data.tasks || []
+      let recentTasks = []
+      try {
+        const tasksRes = await taskService.list({ limit: 10 })
+        recentTasks = tasksRes.data.tasks || []
+      } catch (e) {
+        console.error('Error loading tasks:', e)
+      }
 
       setStats({
         totalQueues: queues.length,
