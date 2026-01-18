@@ -124,10 +124,11 @@ app.add_middleware(
 )
 
 # Add API rate limiting middleware
+# Increased limits for testing - in production, use stricter limits
 app.add_middleware(
     APIRateLimitMiddleware,
-    requests_per_minute=60,
-    requests_per_hour=1000
+    requests_per_minute=300,  # Increased from 60 for testing
+    requests_per_hour=10000   # Increased from 1000 for testing
 )
 
 
