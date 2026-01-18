@@ -14,6 +14,7 @@ from jobqueue.backend.postgres_backend import postgres_backend
 from jobqueue.core.task import Task, TaskStatus, TaskPriority
 from jobqueue.core.rate_limiter import rate_limiter
 from jobqueue.core.task_registry import task_registry
+from jobqueue.core.worker_heartbeat import worker_heartbeat, WorkerStatus
 from jobqueue.utils.logger import log
 from jobqueue.utils.retry import wait_with_backoff
 from config import settings
@@ -155,7 +156,7 @@ class Worker:
         log.info(f"Worker {self.worker_id} stopped")
     
     def _register_worker(self):
-        """Register worker in the database."""
+        """Register worker in the database and send initial heartbeat."""
         query = """
         INSERT INTO workers (id, hostname, pid, status, processed_tasks, failed_tasks)
         VALUES (%s, %s, %s, %s, %s, %s)
@@ -175,7 +176,20 @@ class Worker:
         )
         
         postgres_backend.execute_query(query, params)
-        log.info(f"Worker {self.worker_id} registered in database")
+        
+        # Send initial heartbeat to Redis
+        worker_heartbeat.send_heartbeat(
+            self.worker_id,
+            WorkerStatus.IDLE,
+            {
+                "hostname": self.hostname,
+                "pid": self.pid,
+                "processed_tasks": self.processed_tasks,
+                "failed_tasks": self.failed_tasks
+            }
+        )
+        
+        log.info(f"Worker {self.worker_id} registered in database and Redis")
     
     def _update_worker_status(self, status: str):
         """Update worker status in database."""
@@ -208,8 +222,29 @@ class Worker:
         # Priority order for queue checking
         priorities = [TaskPriority.HIGH, TaskPriority.MEDIUM, TaskPriority.LOW]
         
+        # Track last heartbeat time
+        import time
+        last_heartbeat = time.time()
+        heartbeat_interval = 10  # Send heartbeat every 10 seconds
+        
         while self.is_running:
             try:
+                # Send heartbeat periodically
+                current_time = time.time()
+                if current_time - last_heartbeat >= heartbeat_interval:
+                    worker_heartbeat.send_heartbeat(
+                        self.worker_id,
+                        WorkerStatus.ACTIVE if self.current_task else WorkerStatus.IDLE,
+                        {
+                            "hostname": self.hostname,
+                            "pid": self.pid,
+                            "processed_tasks": self.processed_tasks,
+                            "failed_tasks": self.failed_tasks,
+                            "current_task_id": self.current_task.id if self.current_task else None
+                        }
+                    )
+                    last_heartbeat = current_time
+                
                 # Check max tasks per child limit
                 if self.processed_tasks >= settings.worker_max_tasks_per_child:
                     log.info(f"Worker reached max tasks limit, shutting down for restart")
@@ -240,7 +275,7 @@ class Worker:
                 if task:
                     self._process_task(task)
                 else:
-                    # Update heartbeat even when idle
+                    # Update status when idle
                     self._update_worker_status("idle")
                 
             except Exception as e:
@@ -270,6 +305,19 @@ class Worker:
             task.mark_running(self.worker_id)
             self._update_task_in_db(task)
             self._update_worker_status("running")
+            
+            # Send heartbeat with running status
+            worker_heartbeat.send_heartbeat(
+                self.worker_id,
+                WorkerStatus.ACTIVE,
+                {
+                    "hostname": self.hostname,
+                    "pid": self.pid,
+                    "processed_tasks": self.processed_tasks,
+                    "failed_tasks": self.failed_tasks,
+                    "current_task_id": task.id
+                }
+            )
             
             # Execute the task
             # TODO: Implement actual task execution with registered task handlers
