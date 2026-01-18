@@ -147,8 +147,14 @@ class SimpleWorker(Worker):
         """
         Main worker loop - continuously pull and process tasks.
         Respects rate limits before dequeuing tasks.
+        Checks all priority queues (HIGH, MEDIUM, LOW) in priority order.
         """
+        from jobqueue.core.task import TaskPriority
+        
         log.info(f"Worker {self.worker_id} entering main loop")
+        
+        # Priority order for queue checking (HIGH first)
+        priorities = [TaskPriority.HIGH, TaskPriority.MEDIUM, TaskPriority.LOW]
         
         while self.is_running:
             try:
@@ -174,21 +180,44 @@ class SimpleWorker(Worker):
                         time.sleep(min(wait_time + 0.1, self.poll_timeout))
                         continue
                 
-                # Pull task from queue with timeout
-                task = self.queue.dequeue(timeout=self.poll_timeout)
+                # Try to get task from each priority queue (HIGH first)
+                task = None
+                for priority in priorities:
+                    # Create queue key for this priority
+                    priority_queue_key = f"queue:{self.queue_name}:{priority.value}"
+                    
+                    # Try to pop task from this priority queue (non-blocking)
+                    task_json = redis_broker.client.rpop(priority_queue_key)
+                    
+                    if task_json:
+                        task = Task.from_json(task_json)
+                        log.debug(
+                            f"Worker {self.worker_id} got task from priority queue",
+                            extra={
+                                "task_id": task.id,
+                                "priority": priority.value,
+                                "queue": priority_queue_key
+                            }
+                        )
+                        break
                 
                 if task is None:
-                    # Timeout, no task available
-                    log.debug(
-                        f"Worker {self.worker_id} waiting for tasks...",
-                        extra={"queue": self.queue_name}
-                    )
-                    continue
+                    # No task available in any priority queue
+                    # Use blocking pop on default queue as fallback (for backward compatibility)
+                    task = self.queue.dequeue(timeout=self.poll_timeout)
+                    
+                    if task is None:
+                        # Timeout, no task available
+                        log.debug(
+                            f"Worker {self.worker_id} waiting for tasks...",
+                            extra={"queue": self.queue_name}
+                        )
+                        continue
                 
                 # Process the task
                 log.info(
                     f"Worker {self.worker_id} received task",
-                    extra={"task_id": task.id, "task_name": task.name}
+                    extra={"task_id": task.id, "task_name": task.name, "priority": task.priority}
                 )
                 
                 self.current_task = task
