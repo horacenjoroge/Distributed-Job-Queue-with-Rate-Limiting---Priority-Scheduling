@@ -19,6 +19,46 @@ from jobqueue.utils.retry import wait_with_backoff
 from config import settings
 
 
+def _register_test_tasks():
+    """Register generic test task handlers for load testing."""
+    def generic_test_task(*args, **kwargs):
+        """Generic test task that simulates work."""
+        import time
+        import random
+        # Simulate some work (0.1-0.5 seconds)
+        time.sleep(random.uniform(0.1, 0.5))
+        return {"result": f"Processed with args={args}, kwargs={kwargs}"}
+    
+    # Register the generic test task function
+    # This will be used as a fallback for any load_test_task_* name
+    task_registry.register_function("load_test_task", generic_test_task)
+    
+    # Store original methods
+    original_execute = task_registry.execute
+    original_is_registered = task_registry.is_registered
+    
+    # Override execute to handle test tasks
+    def execute_with_test_fallback(name: str, *args, **kwargs):
+        """Execute task with fallback to generic test task."""
+        if name.startswith("load_test_task_"):
+            # Use the generic test task for any load_test_task_* name
+            return generic_test_task(*args, **kwargs)
+        return original_execute(name, *args, **kwargs)
+    
+    # Override is_registered to return True for test tasks
+    def is_registered_with_test_fallback(name: str) -> bool:
+        """Check if task is registered, including test tasks."""
+        if name.startswith("load_test_task_"):
+            return True
+        return original_is_registered(name)
+    
+    # Apply overrides
+    task_registry.execute = execute_with_test_fallback
+    task_registry.is_registered = is_registered_with_test_fallback
+    
+    log.info("Registered generic test task handlers for load testing")
+
+
 class Worker:
     """
     Worker class that processes tasks from the queue.
@@ -408,6 +448,9 @@ class Worker:
 def main():
     """Main entry point for the worker."""
     log.info("Starting job queue worker")
+    
+    # Register test task handlers for load testing
+    _register_test_tasks()
     
     worker = Worker()
     
