@@ -1263,6 +1263,26 @@ async def get_metrics(window_seconds: int = 3600):
     try:
         metrics = metrics_collector.get_all_metrics(window_seconds)
         
+        # Get success rate from time-series, or fallback to status_counts
+        success_rate_data = metrics.get("success_rate", {})
+        queue_info = metrics.get("queue_info", {})
+        status_counts = queue_info.get("status_counts", {})
+        
+        # If time-series success rate is 0 but we have status counts, calculate from counts
+        if success_rate_data.get("total", 0) == 0 and status_counts:
+            success_count = status_counts.get("success", 0)
+            failed_count = status_counts.get("failed", 0)
+            total_completed = success_count + failed_count
+            
+            if total_completed > 0:
+                success_rate_data = {
+                    "success_rate": success_count / total_completed,
+                    "failure_rate": failed_count / total_completed,
+                    "total": total_completed,
+                    "success_count": success_count,
+                    "failure_count": failed_count
+                }
+        
         return {
             "timestamp": metrics.get("timestamp"),
             "window_seconds": window_seconds,
@@ -1275,15 +1295,9 @@ async def get_metrics(window_seconds: int = 3600):
                 "p95_ms": metrics.get("duration_percentiles", {}).get(0.95, 0.0),
                 "p99_ms": metrics.get("duration_percentiles", {}).get(0.99, 0.0)
             },
-            "success_rate": metrics.get("success_rate", {}),
+            "success_rate": success_rate_data,
             "queue_size_per_priority": metrics.get("queue_size_per_priority", {}),
-            "queue_info": metrics.get("queue_info", {
-                "queue_sizes_by_priority": {},
-                "pending_tasks": 0,
-                "running_tasks": 0,
-                "queues": {},
-                "status_counts": {}
-            }),
+            "queue_info": queue_info,
             "worker_utilization": metrics.get("worker_utilization", {})
         }
     except Exception as e:
